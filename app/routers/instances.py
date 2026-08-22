@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from .. import aws_cloud, jobs, oci_client
 from ..pcreds import provider_of
 from ..database import db
+from ..routers.vps import list_vps_rows
 from ..schemas import ChangeIpReq, OpReq, TrafficReq
 
 router = APIRouter(prefix="/api", tags=["instances"])
@@ -51,6 +52,10 @@ def list_instances(account_id: int | None = None):
         except Exception as e:  # noqa: BLE001
             tag = f"{acct['name']}·{acct.get('region') or ''}"
             errors.append(f"[{tag}] {e}")
+    try:
+        items.extend(list_vps_rows())   # 手动添加的 VPS 一并展示
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"[手动VPS] {e}")
     data = {"items": items, "errors": errors}
     if account_id is None:
         _INST_CACHE["ts"] = time.time()

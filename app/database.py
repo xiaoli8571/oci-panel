@@ -35,6 +35,18 @@ CREATE TABLE IF NOT EXISTS kv(
     k                TEXT PRIMARY KEY,
     v                TEXT
 );
+CREATE TABLE IF NOT EXISTS vps_hosts(
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    host             TEXT NOT NULL,
+    port             INTEGER DEFAULT 22,
+    username         TEXT NOT NULL,
+    auth_type        TEXT DEFAULT 'password',
+    secret_enc       TEXT DEFAULT '',
+    region           TEXT DEFAULT '',
+    note             TEXT DEFAULT '',
+    created_at       TEXT DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 

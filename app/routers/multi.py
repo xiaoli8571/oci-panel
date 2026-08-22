@@ -251,3 +251,13 @@ def dnshe_delete_record(account_id: int, subdomain_id: int, record_id: str):
 def dnshe_quota(account_id: int):
     acct = _require(_get_account(account_id), "dnshe")
     return dnshe.quota(acct)
+
+
+# ---------------------------------------------------------------- HE Dynamic DNS(nic/update)
+
+@router.post("/he/ddns")
+def he_ddns(body: dict):
+    from .. import he_dns
+    r = he_dns.ddns_update({}, str(body.get("hostname", "")),
+                           str(body.get("secret", "")), str(body.get("ip", "") or ""))
+    return {"ok": True, "message": f"{r['hostname']} → {r['ip']}({r['result'].split()[0]})"}

@@ -11,7 +11,7 @@ from .oci_client import OciError
 from .pcreds import ProviderError
 from .routers import wssh as wssh_router
 from .routers import multi as multi_router
-from .routers import accounts, auth, instances, resources
+from .routers import accounts, auth, instances, resources, vps
 from .routers import guardian as guardian_router
 
 logging.basicConfig(
@@ -34,6 +34,7 @@ app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(instances.router)
 app.include_router(resources.router)
+app.include_router(vps.router)
 app.include_router(guardian_router.router)
 app.include_router(wssh_router.router)
 app.include_router(multi_router.router)

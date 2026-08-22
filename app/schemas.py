@@ -193,3 +193,16 @@ class DnsheRecordIn(BaseModel):
 
 class DnsheRecordUpd(DnsheRecordIn):
     record_id: str = ""
+
+
+# ---------- 手动添加的 VPS 主机 ----------
+
+class VpsHostIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = Field(min_length=1, max_length=64)
+    auth_type: str = Field(default="password")   # password / key
+    secret: str = ""                              # 密码或 PEM 私钥;编辑时留空表示不修改
+    region: str = Field(default="", max_length=64)
+    note: str = Field(default="", max_length=200)

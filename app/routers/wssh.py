@@ -23,6 +23,9 @@ import asyncssh
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .. import config, security
+from ..database import db
+from ..pcreds import ProviderError
+from ..routers.vps import _creds, _get_row
 
 log = logging.getLogger("wssh")
 
@@ -102,13 +105,24 @@ async def ws_ssh(websocket: WebSocket):
             t = msg.get("type")
 
             if t == "open":
-                host = str(msg["host"]); port = int(msg.get("port", 22))
-                user = str(msg["username"])
-                kw = dict(port=port, username=user, known_hosts=None)
-                if msg.get("auth") == "key":
-                    kw["client_keys"] = [asyncssh.import_private_key(msg["secret"])]
+                if msg.get("use_saved"):
+                    # 用面板加密存储的 VPS 凭据直连
+                    try:
+                        row = _get_row(int(msg.get("vps_id", 0)))
+                    except Exception:  # noqa: BLE001
+                        await _send(websocket, type="error", message="VPS 记录不存在")
+                        continue
+                    secret_plain, vkw = _creds(row)
+                    host, port, user = row["host"], int(vkw.pop("port")), str(vkw.pop("username"))
+                    kw = dict(vkw)
                 else:
-                    kw["password"] = str(msg.get("secret", ""))
+                    host = str(msg["host"]); port = int(msg.get("port", 22))
+                    user = str(msg["username"])
+                    kw = dict(port=port, username=user, known_hosts=None)
+                    if msg.get("auth") == "key":
+                        kw["client_keys"] = [asyncssh.import_private_key(msg["secret"])]
+                    else:
+                        kw["password"] = str(msg.get("secret", ""))
                 try:
                     conn = await asyncio.wait_for(asyncssh.connect(host, **kw), timeout=20)
                 except asyncio.TimeoutError:
@@ -254,6 +268,17 @@ async def ws_sftp(websocket: WebSocket):
         await _send(websocket, type="listing", path=path, entries=entries)
 
     async def _connect(msg):
+        if msg.get("use_saved"):
+            try:
+                row = _get_row(int(msg.get("vps_id", 0)))
+            except Exception:  # noqa: BLE001
+                raise ProviderError("VPS 记录不存在")
+            _, vkw = _creds(row)
+            port = int(vkw.pop("port")); username = str(vkw.pop("username"))
+            host = row["host"]
+            return await asyncio.wait_for(
+                asyncssh.connect(host, port=port, username=username,
+                                 known_hosts=None, **vkw), timeout=20)
         kw = dict(port=int(msg.get("port", 22)), username=str(msg["username"]), known_hosts=None)
         if msg.get("auth") == "key":
             kw["client_keys"] = [asyncssh.import_private_key(msg["secret"])]
@@ -312,7 +337,7 @@ async def ws_sftp(websocket: WebSocket):
                     p = str(msg["path"])
                     size = (await sftp.stat(p)).size or 0
                     if size > MAX_TRANSFER:
-                        raise OciLikeError(f"文件超过 {MAX_TRANSFER // 1024 // 1024}MB 上限")
+                        raise MaxTransferError(f"文件超过 {MAX_TRANSFER // 1024 // 1024}MB 上限")
                     await _send(websocket, type="dmeta", path=p, size=size)
                     async with sftp.open(p, "rb") as f:
                         while True:

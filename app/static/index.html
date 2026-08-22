@@ -210,11 +210,8 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
   <div class="brand">☁️ OCI <span>Manage Lite</span></div>
   <nav>
     <button id="nav-inst" class="active" onclick="showTab('inst')">实例管理</button>
-    <button id="nav-quota" onclick="showTab('quota')">配额订阅</button>
-    <button id="nav-dns" onclick="showTab('dns')">域名 DNS</button>
-    <button id="nav-cf" onclick="showTab('cf')">CF Workers</button>
+    <button id="nav-cloud" onclick="showTab('cloud')">云与域名</button>
     <button id="nav-guard" onclick="showTab('guard')">守护中心</button>
-    <button id="nav-ssh" onclick="showTab('ssh')">主机终端</button>
     <button id="nav-acct" onclick="showTab('acct')">账户设置</button>
   </nav>
   <div class="right">
@@ -233,6 +230,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <div class="stat">总内存 <b id="st-mem">-</b></div>
       <div class="spacer"></div>
       <button onclick="openCreate()">＋ 创建实例</button>
+      <button class="btn-purple" onclick="openVpsModal()">＋ 添加 VPS</button>
     </div>
     <div class="tblwrap">
       <table id="instTable">
@@ -244,20 +242,14 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       </table>
     </div>
     <div id="instErrors"></div>
-  </section>
-
-  <!-- ============ 配额订阅 ============ -->
-  <section id="tab-quota" hidden>
-    <div class="toolbar">
-      <div class="stat">说明 <span style="color:var(--text)">A1 核数 / E2.Micro 配额用量(免费层判定)</span></div>
-      <div class="spacer"></div>
-      <button class="btn-ghost" onclick="loadQuota()">⟳ 刷新配额</button>
+    <div class="qcard" style="margin-top:14px">
+      <h4>📊 配额订阅 <button class="btn-ghost" style="float:right" onclick="loadQuota()">⟳ 刷新配额</button></h4>
+      <div id="quotaBody"><p class="hint">Oracle Cloud A1 核数 / E2.Micro 配额用量(免费层判定),点「刷新配额」查询</p></div>
     </div>
-    <div id="quotaBody"><p class="empty">点击"刷新配额"查询</p></div>
   </section>
 
-  <!-- ============ 域名 DNS ============ -->
-  <section id="tab-dns" hidden>
+  <!-- ============ 云与域名(DNS + Workers) ============ -->
+  <section id="tab-cloud" hidden>
     <div class="toolbar">
       <div class="stat">DNS 管理</div>
       <select id="dnsAcct" style="width:220px" onchange="loadZones()"></select>
@@ -272,22 +264,22 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <tbody id="recBody"><tr><td colspan="6" class="empty">选择账户与域名后加载</td></tr></tbody>
     </table></div>
     <p class="hint" id="dnsHint"></p>
-  </section>
 
-  <!-- ============ CF Workers ============ -->
-  <section id="tab-cf" hidden>
-    <div class="toolbar">
-      <div class="stat" id="cfSub">Workers.dev 子域:-</div>
-      <div class="spacer"></div>
-      <button onclick="openWkModal()">＋ 部署新 Worker</button>
-      <button class="btn-cyan" onclick="openGitModal()">从 Git 部署</button>
-      <button class="btn-ghost" onclick="loadWorkers()">⟳ 刷新</button>
-    </div>
+    <!-- ---- Cloudflare Workers ---- -->
+    <div class="qcard" style="margin-top:14px">
+      <h4>⚡ Cloudflare Workers
+        <span style="float:right">
+          <span class="hint" id="cfSub">Workers.dev 子域:-</span>
+          <button onclick="openWkModal()">＋ 部署新 Worker</button>
+          <button class="btn-cyan" onclick="openGitModal()">从 Git 部署</button>
+          <button class="btn-ghost" onclick="loadWorkers()">⟳ 刷新</button>
+        </span>
+      </h4>
     <div class="tblwrap"><table style="min-width:720px">
       <thead><tr><th>脚本名</th><th>所属账户</th><th>创建时间</th><th>修改时间</th><th>操作</th></tr></thead>
       <tbody id="wkBody"><tr><td colspan="5" class="empty">选择 Cloudflare 账户后加载</td></tr></tbody>
     </table></div>
-    <div class="qcard" style="margin-top:14px">
+    <div class="qcard">
       <h4>路由绑定(按域名查看,只读)</h4>
       <select id="cfZoneSel" style="width:280px" onchange="loadRoutes()"></select>
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
@@ -298,6 +290,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <div id="routeBody" style="margin-top:10px"></div>
     </div>
     <p class="hint">Token 需要 Account.Read + Workers Scripts.Edit 权限;部署为 Service Worker 语法(非 ES Module)。</p>
+    </div>
   </section>
 
   <!-- ============ 守护中心 ============ -->
@@ -333,42 +326,6 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
     <div class="qcard" style="margin-top:14px"><h4>最近事件</h4><div id="guardEvents"><p class="empty">加载中…</p></div></div>
   </section>
 
-  <!-- ============ SSH 终端 ============ -->
-  <section id="tab-ssh" hidden>
-    <div class="toolbar">
-      <div class="stat">SSH 终端 <span style="color:var(--text)">轻量版:填写连接信息即可连入</span></div>
-      <div class="spacer"></div>
-      <button class="btn-ghost" onclick="sshClear()">清屏</button>
-      <button class="btn-red" onclick="sshDisconnect()">断开</button>
-    </div>
-    <div class="ssh-layout">
-      <div class="ssh-side">
-        <label>主机地址 *</label>
-        <input id="ssh-host" placeholder="1.2.3.4 或 host.com">
-        <label>端口</label>
-        <input id="ssh-port" type="number" value="22">
-        <label>用户名 *</label>
-        <input id="ssh-user" placeholder="root / ubuntu / opc">
-        <label>认证方式</label>
-        <select id="ssh-auth" onchange="document.getElementById('ssh-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
-          <option value="password">密码</option>
-          <option value="key">SSH 私钥</option>
-        </select>
-        <label id="ssh-label">密码</label>
-        <textarea id="ssh-secret" style="min-height:70px" placeholder="密码或 PEM 私钥"></textarea>
-        <p class="hint">凭据只保存在浏览器内存,关闭页面即清除;主机指纹首次连接需确认。</p>
-        <button style="width:100%;margin-top:8px" onclick="sshConnect()">🚀 连接</button>
-        <div class="chips" id="ssh-quick" style="margin-top:8px"><span style="color:var(--muted);font-size:12px">加载云主机…</span></div>
-      </div>
-      <div id="sshRight">
-        <div style="height:100%;min-height:420px;background:#0a0f15;border:1px solid var(--line);border-radius:10px;padding:6px;position:relative">
-          <div class="term-status" id="ssh-status" style="position:absolute;top:10px;right:16px;z-index:5">未连接</div>
-          <div id="ssh-term" style="height:100%"></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- ============ 账户 ============ -->
   <section id="tab-acct" hidden>
     <div class="qcard">
@@ -393,6 +350,108 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
     <p class="hint">同一账号如需管理多个区域,可为不同 region 各添加一条记录。私钥仅加密存储在本机 data 目录,不会回传明文。</p>
   </section>
 </main>
+
+<!-- 添加 / 编辑 VPS -->
+<div class="mask" id="vpsModal">
+  <div class="modal">
+    <h3 id="vpsTitle">添加 VPS 主机</h3>
+    <div class="grid2">
+      <div><label>备注名称 *</label><input id="v-name" placeholder="如 小鸡1 / 家宽VPS"></div>
+      <div><label>IP 或域名 *</label><input id="v-host" placeholder="1.2.3.4"></div>
+      <div><label>SSH 端口</label><input id="v-port" type="number" value="22"></div>
+      <div><label>用户名 *</label><input id="v-user" placeholder="root"></div>
+      <div><label>认证方式</label>
+        <select id="v-auth" onchange="document.getElementById('v-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
+          <option value="password">密码</option>
+          <option value="key">SSH 私钥</option>
+        </select></div>
+      <div><label>区域/位置备注</label><input id="v-region" placeholder="如 香港 / sgp(可空)"></div>
+      <div style="grid-column:1/-1"><label id="v-label">密码 *(编辑时留空=不修改)</label>
+        <textarea id="v-secret" style="min-height:64px" placeholder="密码或 PEM 私钥"></textarea></div>
+      <div style="grid-column:1/-1"><label>备注</label><input id="v-note" placeholder="用途说明(可空)"></div>
+    </div>
+    <p class="hint">凭据加密存储在面板服务器;支持任何云厂商或自建服务器的统一纳管。</p>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('vpsModal')">取消</button>
+      <button onclick="saveVps()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- SSH 终端弹窗(从实例行发起) -->
+<div class="mask" id="sshModal">
+  <div class="modal wide">
+    <h3>🖥 SSH 终端 · <span id="sshm-title">-</span></h3>
+    <div id="sshForm">
+      <div class="grid2">
+        <div><label>主机地址</label><input id="ssh-host" placeholder="1.2.3.4"></div>
+        <div><label>端口</label><input id="ssh-port" type="number" value="22"></div>
+        <div><label>用户名</label><input id="ssh-user" placeholder="root"></div>
+        <div><label>认证方式</label>
+          <select id="ssh-auth" onchange="document.getElementById('ssh-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
+            <option value="password">密码</option>
+            <option value="key">SSH 私钥</option>
+          </select></div>
+        <div style="grid-column:1/-1"><label id="ssh-label">密码</label>
+          <textarea id="ssh-secret" style="min-height:60px" placeholder="密码或 PEM 私钥"></textarea></div>
+      </div>
+      <p class="hint">凭据只保存在浏览器内存,关闭页面即清除。已登记的 VPS 可直接用保存的凭据连接。</p>
+    </div>
+    <div id="sshWrap" hidden>
+      <div style="position:relative;background:#0a0f15;border:1px solid var(--line);border-radius:10px;padding:6px;height:56vh;min-height:360px">
+        <div class="term-status" id="ssh-status" style="position:absolute;top:10px;right:16px;z-index:5">未连接</div>
+        <div id="ssh-term" style="height:100%"></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="sshClear()">清屏</button>
+      <button class="btn-ghost" onclick="hide('sshModal');sshDisconnect()">关闭</button>
+      <button id="sshGoBtn" onclick="sshConnect()">🚀 连接</button>
+    </div>
+  </div>
+</div>
+
+<!-- SFTP 文件管理器弹窗 -->
+<div class="mask" id="sftpModal">
+  <div class="modal wide">
+    <h3>📁 SFTP 文件管理 · <span id="sftp-title">-</span></h3>
+    <div id="sftpLogin">
+      <div class="grid2">
+        <div><label>主机地址</label><input id="sftp-host" placeholder="1.2.3.4"></div>
+        <div><label>端口</label><input id="sftp-port" type="number" value="22"></div>
+        <div><label>用户名</label><input id="sftp-user" placeholder="root"></div>
+        <div><label>认证方式</label>
+          <select id="sftp-auth" onchange="document.getElementById('sftp-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
+            <option value="password">密码</option>
+            <option value="key">SSH 私钥</option>
+          </select></div>
+        <div style="grid-column:1/-1"><label id="sftp-label">密码</label>
+          <textarea id="sftp-secret" style="min-height:60px" placeholder="密码或 PEM 私钥"></textarea></div>
+      </div>
+      <p class="hint">与终端一致:凭据仅存于浏览器内存。</p>
+    </div>
+    <div id="sftpMain" hidden>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <button class="btn-ghost btn-sm" onclick="sftpUp()">⬆ 上级</button>
+        <input id="sftp-path" style="flex:1;min-width:220px;font-family:monospace" readonly>
+        <button class="btn-ghost btn-sm" onclick="sftpMkdir()">＋ 新建目录</button>
+        <label class="btn-ghost btn-sm" style="cursor:pointer">📤 上传文件
+          <input type="file" id="sftp-file" style="display:none" onchange="sftpUpload(this)"></label>
+        <span id="sftp-status" class="hint"></span>
+      </div>
+      <div class="tblwrap" style="max-height:48vh;overflow:auto">
+        <table>
+          <thead><tr><th>名称</th><th style="width:90px">大小</th><th style="width:150px">修改时间</th><th style="width:170px">操作</th></tr></thead>
+          <tbody id="sftp-body"><tr><td colspan="4" class="empty">未连接</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('sftpModal');sftpDisconnect()">关闭</button>
+      <button id="sftpGoBtn" onclick="sftpConnect()">🔗 连接</button>
+    </div>
+  </div>
+</div>
 
 <!-- 账户表单 -->
 <div class="mask" id="acctModal">
@@ -743,15 +802,13 @@ async function doLogin() {
 }
 async function logout() { try { await api("/api/logout", { method: "POST" }); } catch {} showLogin(); }
 
-const TABS = ["inst", "quota", "dns", "cf", "guard", "ssh", "acct"];
+const TABS = ["inst", "cloud", "guard", "acct"];
 function showTab(t) {
   TABS.forEach(x => { const el = $("#tab-" + x); if (el) el.hidden = x !== t;
     const b = $("#nav-" + x); b && b.classList.toggle("active", x === t); });
-  if (t === "quota" && $("#quotaBody").querySelector(".empty")) loadQuota();
+  if (t === "inst" && $("#quotaBody").querySelector(".hint")) loadQuota();
   if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); }
-  if (t === "ssh") { sshInit(); setTimeout(() => { try{ sshFit && sshFit.fit(); }catch{} }, 60); }
-  if (t === "dns") initDnsTab();
-  if (t === "cf") initCfTab();
+  if (t === "cloud") initCloudTab();
 }
 
 /* ================= 实例列表 ================= */
@@ -778,10 +835,29 @@ async function loadInstances() {
 function renderInstances() {
   const tb = $("#instBody");
   if (!instItems.length) {
-    tb.innerHTML = `<tr><td colspan="9" class="empty">暂无实例,点击右上角"创建实例"或先添加账户</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="9" class="empty">暂无实例,点击右上角"创建实例"/"添加 VPS"或先添加账户</td></tr>`;
   } else {
     tb.innerHTML = instItems.map((i, idx) => {
       const running = i.state === "RUNNING";
+      if (i.provider === "vps") {
+        return `<tr>
+        <td class="wrap" data-l="实例"><b>${esc(i.name)}</b><br><span style="color:var(--muted);font-size:12px">手动添加</span></td>
+        <td data-l="状态"><span class="badge b-purple">VPS</span></td>
+        <td data-l="公网IP">${i.public_ip ? `<span class="ip" onclick="copyText('${i.public_ip}')">${i.public_ip}</span>` : "-"}</td>
+        <td data-l="私网IP">-</td>
+        <td class="wrap" data-l="配置">${esc(i.shape)}<br><span style="color:var(--muted);font-size:11px">${esc(i.ad || "")}</span></td>
+        <td data-l="启动盘">-</td>
+        <td data-l="区域/AD">${esc(i.region)}</td>
+        <td data-l="账户"><span class="badge b-info">自管</span></td>
+        <td class="cell-ops"><div class="ops">
+          <button class="btn-green" onclick="openSshModal(${idx})">SSH</button>
+          <button class="btn-cyan" onclick="openSftpModal(${idx})">SFTP</button>
+          <button class="btn-ghost" onclick="vpsTest(${idx})">测活</button>
+          <button class="btn-warn" onclick="vpsReboot(${idx})">重启</button>
+          <button class="btn-ghost" onclick='openVpsModal(true,${JSON.stringify(vpsByIdx(idx)).replace(/'/g, "&#39;")})'>编辑</button>
+          <button class="btn-red" onclick="delVps(${idx})">删除</button>
+        </div></td></tr>`;
+      }
       const spec = i.ocpus ? `${i.ocpus} OCPU / ${i.mem_gbs} GB` : esc((i.shape || "").replace("VM.Standard.", ""));
       return `<tr>
         <td class="wrap" data-l="实例"><b>${esc(i.name)}</b><br><span style="color:var(--muted);font-size:12px">${esc(i.compartment_name)}</span></td>
@@ -793,6 +869,8 @@ function renderInstances() {
         <td data-l="区域/AD">${esc(i.region)}<br><span style="color:var(--muted);font-size:12px">${esc(i.ad)}</span></td>
         <td data-l="账户">${esc(i.account_name)}${i.provider === "aws" ? ' <span class="badge b-busy">AWS</span>' : ""}</td>
         <td class="cell-ops"><div class="ops">
+          <button ${running ? "" : "disabled"} class="btn-green" onclick="openSshModal(${idx})">SSH</button>
+          <button ${running ? "" : "disabled"} class="btn-cyan" onclick="openSftpModal(${idx})">SFTP</button>
           <button ${running ? "disabled" : ""} onclick="doOp(${idx},'START')">启动</button>
           <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'${i.provider === "aws" ? "STOP" : "SOFTSTOP"}')">关机</button>
           <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'RESET')">重启</button>
@@ -1461,24 +1539,83 @@ async function runGuardOnce() {
   catch (e) { toast(e.message, "err"); }
 }
 
-/* ================= SSH 终端(轻量版) ================= */
-let sshTerm = null, sshFit = null, sshWs = null, sshOpened = false;
-function sshInit() { renderSshQuick(); }
-async function renderSshQuick() {
-  const box = document.getElementById("ssh-quick");
-  if (!box) return;
-  try {
-    const d = await api("/api/instances");
-    const items = (d.items || []).filter(i => i.public_ip);
-    box.innerHTML = items.slice(0, 8).map(i =>
-      `<span class="chip" onclick="sshFill('${i.public_ip}','${esc(i.name)}')">${esc(i.name)}(${i.public_ip})</span>`).join("")
-      || '<span style="color:var(--muted);font-size:12px">暂无云主机 IP,可手动填写</span>';
-  } catch { box.innerHTML = '<span style="color:var(--muted);font-size:12px">无法拉取云主机</span>'; }
+/* ================= 手动 VPS 管理 ================= */
+let vpsItems = [];
+async function loadVps() {
+  try { const d = await api("/api/vps"); vpsItems = d.items || []; }
+  catch { vpsItems = []; }
 }
-function sshFill(ip, name) {
-  document.getElementById("ssh-host").value = ip;
-  if (!document.getElementById("ssh-user").value)
-    document.getElementById("ssh-user").value = /ubuntu/i.test(name) ? "ubuntu" : "root";
+function vpsByIdx(idx) {
+  const it = instItems[idx];
+  return vpsItems.find(v => v.id === it?.vps_id) || {};
+}
+let editVpsId = null;
+function openVpsModal(edit, data) {
+  editVpsId = edit ? data.id : null;
+  $("#vpsTitle").textContent = edit ? "编辑 VPS:" + data.name : "添加 VPS 主机";
+  $("#v-name").value = data?.name || ""; $("#v-host").value = data?.host || "";
+  $("#v-port").value = data?.port || 22; $("#v-user").value = data?.username || "";
+  $("#v-auth").value = data?.auth_type || "password";
+  $("#v-region").value = data?.region || ""; $("#v-note").value = data?.note || "";
+  $("#v-secret").value = "";
+  $("#v-label").textContent = (edit ? "密码/私钥(留空=不修改)" : (data?.auth_type === "key" ? "SSH 私钥(PEM)*" : "密码*"));
+  show("vpsModal");
+}
+async function saveVps() {
+  const body = {
+    name: $("#v-name").value.trim(), host: $("#v-host").value.trim(),
+    port: +$("#v-port").value || 22, username: $("#v-user").value.trim(),
+    auth_type: $("#v-auth").value, secret: $("#v-secret").value,
+    region: $("#v-region").value.trim(), note: $("#v-note").value.trim(),
+  };
+  if (!body.name || !body.host || !body.username) return toast("请填写名称/IP/用户名", "err");
+  if (!editVpsId && !body.secret.trim()) return toast("请输入密码或私钥", "err");
+  try {
+    if (editVpsId) await api("/api/vps/" + editVpsId, { method: "PUT", body: JSON.stringify(body) });
+    else await api("/api/vps", { method: "POST", body: JSON.stringify(body) });
+    hide("vpsModal"); toast("已保存", "ok");
+    await loadVps(); loadInstances();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function delVps(idx) {
+  const i = instItems[idx];
+  if (!confirm(`确认删除手动 VPS「${i.name}」?仅移除面板记录,不影响服务器本身。`)) return;
+  try { await api("/api/vps/" + i.vps_id, { method: "DELETE" }); toast("已删除", "ok"); await loadVps(); loadInstances(); }
+  catch (e) { toast(e.message, "err"); }
+}
+async function vpsTest(idx) {
+  const i = instItems[idx];
+  toast("正在测活:" + i.name + " …");
+  try {
+    const d = await api(`/api/vps/${i.vps_id}/test`, { method: "POST" });
+    toast((d.ok ? "✅ " : "⚠ ") + d.message, d.ok ? "ok" : "err");
+  } catch (e) { toast("❌ " + e.message, "err"); }
+}
+async function vpsReboot(idx) {
+  const i = instItems[idx];
+  if (!confirm(`确认通过 SSH 向「${i.name}」下发重启命令?\n期间无法连接约 1~2 分钟。`)) return;
+  try {
+    const d = await api(`/api/vps/${i.vps_id}/reboot`, { method: "POST" });
+    toast("🔄 " + d.message, "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= SSH 终端(弹窗版,实例行直连) ================= */
+let sshTerm = null, sshFit = null, sshWs = null, sshOpened = false, curSshItem = null;
+function openSshModal(idx) {
+  curSshItem = instItems[idx] || null;
+  $("#sshm-title").textContent = curSshItem ? `${curSshItem.name}(${curSshItem.public_ip || "-"})` : "-";
+  $("#ssh-host").value = curSshItem?.public_ip || "";
+  $("#ssh-port").value = 22;
+  $("#ssh-user").value = "";
+  $("#ssh-secret").value = "";
+  $("#ssh-auth").value = "password";
+  $("#ssh-label").textContent = "密码";
+  $("#sshForm").hidden = false;
+  $("#sshWrap").hidden = true;
+  sshStatus("未连接");
+  show("sshModal");
+  setTimeout(() => { try{ sshTerm && sshFit && sshFit.fit(); }catch{} }, 80);
 }
 function sshEnsureTerm() {
   if (sshTerm) return true;
@@ -1508,22 +1645,28 @@ function sshConnect() {
   const auth = document.getElementById("ssh-auth").value;
   const secret = document.getElementById("ssh-secret").value;
   if (!host || !user) return toast("请填写主机和用户名","err");
-  if (!secret.trim()) return toast("请输入密码或私钥","err");
+  // 已登记 VPS 且没重新输入凭据 → 用面板加密存储的凭据
+  const useSaved = !secret.trim() && curSshItem?.provider === "vps" && curSshItem?.vps_id;
+  if (!secret.trim() && !useSaved) return toast("请输入密码或私钥(已登记 VPS 可留空用已存凭据)","err");
   if (!sshEnsureTerm()) return;
   sshDisconnect();
   sshStatus("连接中…");
   const proto = location.protocol === "https:" ? "wss" : "ws";
   sshWs = new WebSocket(`${proto}://${location.host}/ws/ssh`);
-  sshWs.onopen = () => sshWs.send(JSON.stringify({type:"open",host,port,username:user,auth,secret,
-    cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}));
+  sshWs.onopen = () => sshWs.send(JSON.stringify(useSaved
+    ? {type:"open",use_saved:true,vps_id:curSshItem.vps_id,cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}
+    : {type:"open",host,port,username:user,auth,secret,cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}));
   sshWs.onmessage = ev => {
     let m; try{m=JSON.parse(ev.data);}catch{return;}
     if(m.type==="data") sshTerm.write(m.data);
-    else if(m.type==="opened"){ sshOpened=true; sshStatus("● 已连接","ok"); }
+    else if(m.type==="opened"){
+      sshOpened=true; sshStatus("● 已连接","ok");
+      $("#sshForm").hidden = true; $("#sshWrap").hidden = false;
+      setTimeout(() => { try{ sshFit.fit(); }catch{} }, 60);
+    }
     else if(m.type==="hostkey"){
       if(confirm(`首次连接 ${host}\n\n主机指纹:\n${m.fingerprint}\n\n信任并继续?`))
-        sshWs.send(JSON.stringify({type:"trust",host,port,username:user,auth,secret,
-          cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}));
+        sshWs.send(JSON.stringify({type:"trust"}));
       else { sshWs.send(JSON.stringify({type:"reject"})); sshStatus("已取消","err"); }
     }
     else if(m.type==="exit") sshStatus("● 会话已结束","");
@@ -1541,6 +1684,147 @@ function sshDisconnect() {
 }
 function sshClear() { try{ sshTerm && sshTerm.clear(); }catch{} }
 window.addEventListener("resize", () => { try{ sshFit && sshFit.fit(); }catch{} });
+
+/* ================= SFTP 文件管理(弹窗版) ================= */
+let sftpWs = null, sftpPath = "/", sftpDl = null, sftpUpBuf = null, sftpUpName = "", curSftpItem = null;
+function sfmtSize(b) {
+  if (!b && b !== 0) return "-";
+  if (!b) return "0";
+  const u = ["B","KB","MB","GB"]; let i = 0;
+  while (b >= 1024 && i < u.length-1) { b /= 1024; i++; }
+  return b.toFixed(b < 10 && i > 0 ? 1 : 0) + " " + u[i];
+}
+function openSftpModal(idx) {
+  curSftpItem = instItems[idx] || null;
+  $("#sftp-title").textContent = curSftpItem ? `${curSftpItem.name}(${curSftpItem.public_ip || "-"})` : "-";
+  $("#sftp-host").value = curSftpItem?.public_ip || "";
+  $("#sftp-port").value = 22;
+  $("#sftp-user").value = "";
+  $("#sftp-secret").value = "";
+  $("#sftp-auth").value = "password";
+  $("#sftp-label").textContent = "密码";
+  $("#sftpLogin").hidden = false; $("#sftpMain").hidden = true;
+  $("#sftp-status").textContent = "";
+  show("sftpModal");
+}
+function sftpSetStatus(t) { const el = $("#sftp-status"); if (el) el.textContent = t; }
+function sftpDisconnect() { if (sftpWs) { try{sftpWs.close();}catch{} sftpWs=null; } sftpDl=null; sftpUpBuf=null; }
+function sftpConnect() {
+  const host = $("#sftp-host").value.trim();
+  const user = $("#sftp-user").value.trim();
+  const secret = $("#sftp-secret").value;
+  const auth = $("#sftp-auth").value;
+  const port = +$("#sftp-port").value || 22;
+  if (!host || !user) return toast("请填写主机和用户名","err");
+  const useSaved = !secret.trim() && curSftpItem?.provider === "vps" && curSftpItem?.vps_id;
+  if (!secret.trim() && !useSaved) return toast("请输入密码或私钥(已登记 VPS 可留空用已存凭据)","err");
+  sftpSetStatus("连接中…");
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  sftpWs = new WebSocket(`${proto}://${location.host}/ws/sftp`);
+  sftpWs.onopen = () => sftpWs.send(JSON.stringify(useSaved
+    ? {type:"open",use_saved:true,vps_id:curSftpItem.vps_id}
+    : {type:"open",host,port,username:user,auth,secret}));
+  sftpWs.onmessage = ev => sftpHandle(ev);
+  sftpWs.onclose = () => { if ($("#sftpMain") && !$("#sftpMain").hidden) sftpSetStatus("(连接已断开)"); };
+}
+async function sftpHandle(ev) {
+  let m; try { m = JSON.parse(ev.data); } catch { return; }
+  if (m.type === "opened") {
+    sftpPath = m.home || "/";
+    $("#sftpLogin").hidden = true; $("#sftpMain").hidden = false;
+    sftpSetStatus("已连接");
+  } else if (m.type === "listing") {
+    sftpPath = m.path; $("#sftp-path").value = m.path;
+    $("#sftp-body").innerHTML = m.entries.length ? m.entries.map(e => `<tr>
+      <td class="wrap">${e.is_dir
+        ? `<span class="ip" onclick="sftpCd('${esc(e.name).replace(/'/g,"\\'")}')">📁 ${esc(e.name)}</span>`
+        : `<span style="font-size:13px">📄 ${esc(e.name)}</span>`}</td>
+      <td>${e.is_dir ? "-" : sfmtSize(e.size)}</td>
+      <td style="color:var(--muted);font-size:12px">${new Date(e.mtime*1000).toLocaleString()}</td>
+      <td><div class="ops">
+        ${!e.is_dir ? `<button class="btn-green btn-sm" onclick='sftpDownload(${JSON.stringify(sftpPath+"/"+e.name).replace(/'/g,"&#39;")})'>下载</button>` : ""}
+        <button class="btn-ghost btn-sm" onclick='sftpRename(${JSON.stringify(sftpPath+"/"+e.name).replace(/'/g,"&#39;")})'>改名</button>
+        <button class="btn-red btn-sm" onclick='sftpDelete(${JSON.stringify(sftpPath+"/"+e.name).replace(/'/g,"&#39;")},${e.is_dir})'>删除</button>
+      </div></td></tr>`).join("")
+      : `<tr><td colspan="4" class="empty">空目录</td></tr>`;
+    sftpSetStatus("");
+  } else if (m.type === "dmeta") {
+    sftpDl = { path: m.path, size: m.size, chunks: [] };
+    sftpSetStatus("下载中… 0%");
+  } else if (m.type === "dchunk") {
+    if (sftpDl) {
+      sftpDl.chunks.push(m.data);
+      const pct = Math.min(99, Math.round(sftpDl.chunks.length * 256 / Math.max(1, sftpDl.size) * 1024));
+      sftpSetStatus(`下载中… ${pct}%`);
+    }
+  } else if (m.type === "deof") {
+    if (sftpDl) {
+      const bin = atob(sftpDl.chunks.join(""));
+      const arr = new Uint8Array(bin.length);
+      for (let k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
+      const blob = new Blob([arr]);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = sftpDl.path.split("/").pop() || "file";
+      a.click(); URL.revokeObjectURL(a.href);
+      sftpDl = null; sftpSetStatus("✅ 下载完成");
+    }
+  } else if (m.type === "uready") {
+    // 开始分片发送文件
+    const file = sftpUpFile; let offset = 0;
+    const CH = 256 * 1024;
+    while (offset < file.size) {
+      const slice = file.slice(offset, offset + CH);
+      const buf = new Uint8Array(await slice.arrayBuffer());
+      let bin = ""; const CHUNK = 0x8000;
+      for (let k = 0; k < buf.length; k += CHUNK)
+        bin += String.fromCharCode.apply(null, buf.subarray(k, k + CHUNK));
+      sftpWs.send(JSON.stringify({ type: "uchunk", data: btoa(bin) }));
+      offset += CH;
+      sftpSetStatus(`上传中… ${Math.round(offset / file.size * 100)}%`);
+    }
+    sftpWs.send(JSON.stringify({ type: "udone" }));
+  } else if (m.type === "ok") {
+    sftpUpFile = null;
+    if (sftpWs && sftpWs.readyState === 1) sftpWs.send(JSON.stringify({ type: "list", path: sftpPath }));
+    setTimeout(() => sftpSetStatus(""), 1500);
+  } else if (m.type === "error") {
+    sftpUpFile = null; sftpSetStatus("✕ " + m.message);
+    toast(m.message, "err");
+  }
+}
+let sftpUpFile = null;
+function sftpCd(name) {
+  const p = name.startsWith("/") ? name : (sftpPath.replace(/\/$/, "") + "/" + name);
+  if (sftpWs && sftpWs.readyState === 1) sftpWs.send(JSON.stringify({ type: "list", path: p }));
+}
+function sftpUp() { sftpCd(sftpPath.replace(/\/[^\/]*$/, "") || "/"); }
+function sftpMkdir() {
+  const n = prompt("新目录名:");
+  if (!n) return;
+  sftpWs.send(JSON.stringify({ type: "mkdir", path: sftpPath.replace(/\/$/, "") + "/" + n }));
+}
+function sftpDelete(p, isDir) {
+  if (!confirm("确认删除 " + p + (isDir ? "(目录需为空)" : "") + "?")) return;
+  sftpWs.send(JSON.stringify({ type: "delete", path: p, is_dir: !!isDir }));
+}
+function sftpRename(p) {
+  const nn = prompt("新名称/路径:", p.split("/").pop());
+  if (!nn) return;
+  sftpWs.send(JSON.stringify({ type: "rename", from: p, to: sftpPath.replace(/\/$/, "") + "/" + nn }));
+}
+function sftpDownload(p) {
+  if (sftpWs && sftpWs.readyState === 1) sftpWs.send(JSON.stringify({ type: "download", path: p }));
+}
+function sftpUpload(input) {
+  const f = input.files?.[0];
+  input.value = "";
+  if (!f) return;
+  if (f.size > 50 * 1024 * 1024) return toast("文件超过 50MB 上限", "err");
+  sftpUpFile = f;
+  sftpSetStatus("准备上传…");
+  sftpWs.send(JSON.stringify({ type: "upload", path: sftpPath.replace(/\/$/, "") + "/" + f.name, size: f.size }));
+}
 
 
 function openGitModal() {
@@ -1569,9 +1853,362 @@ async function gitDeploy() {
   } catch (e) { toast("部署失败:" + e.message, "err"); }
 }
 
+/* ================= 云与域名页初始化 ================= */
+let dnsAccts = [], curDnsAcct = null, curZoneId = "", curZoneName = "", cfZonesCache = [];
+function initCloudTab() { initDnsSelectors(); }
+
+function initDnsSelectors() {
+  const sel = $("#dnsAcct");
+  const dnsProviders = acctItems.filter(a => ["cloudflare", "dnshe", "he"].includes(a.provider));
+  if (!dnsProviders.length) {
+    sel.innerHTML = `<option value="">(无 DNS 类账户)</option>`;
+    $("#dnsZone").innerHTML = `<option value="">-</option>`;
+    $("#recBody").innerHTML = `<tr><td colspan="6" class="empty">先到「账户设置」添加 Cloudflare 或 DNSHE 账户</td></tr>`;
+    return;
+  }
+  sel.innerHTML = dnsProviders.map(a =>
+    `<option value="${a.provider}:${a.id}">${esc(a.name)} · ${esc(a.provider)}</option>`).join("");
+  loadZones();
+}
+
+async function loadZones() {
+  const v = ($("#dnsAcct").value || "");
+  const [prov, aidStr] = v.split(":");
+  curDnsAcct = acctItems.find(a => String(a.id) === aidStr) || null;
+  const zsel = $("#dnsZone");
+  zsel.innerHTML = `<option>加载中…</option>`;
+  try {
+    let zones = [];
+    if (prov === "cloudflare") {
+      const d = await api(`/api/cf/zones?account_id=${aidStr}`);
+      zones = d.items.map(z => ({ id: z.id, name: z.name }));
+      cfZonesCache = zones;
+    } else if (prov === "dnshe") {
+      const d = await api(`/api/dnshe/subdomains?account_id=${aidStr}`);
+      const subs = d.items || [];
+      zones = subs.map(s => ({ id: s.id, name: `${s.subdomain}.${s.rootdomain}`, dnshe: true }));
+    } else {
+      throw new Error("该账户类型暂不支持在此管理 DNS");
+    }
+    zsel.innerHTML = zones.length
+      ? zones.map(z => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join("")
+      : `<option value="">无可用域名</option>`;
+    loadRecords();
+  } catch (e) {
+    zsel.innerHTML = `<option value="">${esc(e.message)}</option>`;
+    $("#recBody").innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`;
+  }
+}
+
+async function loadRecords() {
+  const v = ($("#dnsAcct").value || "");
+  const prov = v.split(":")[0];
+  const aidStr = v.split(":")[1];
+  const zid = $("#dnsZone").value;
+  curZoneId = zid;
+  curZoneName = $("#dnsZone").selectedOptions[0]?.textContent || "";
+  if (!zid) { $("#recBody").innerHTML = `<tr><td colspan="6" class="empty">请选择域名</td></tr>`; return; }
+  $("#recBody").innerHTML = `<tr><td colspan="6" class="empty">加载中…</td></tr>`;
+  try {
+    let rows = [];
+    if (prov === "cloudflare") {
+      const d = await api(`/api/cf/records?account_id=${aidStr}&zone_id=${encodeURIComponent(zid)}`);
+      rows = d.items.map(r => ({
+        type: r.type, name: r.name, content: r.content, ttl: r.ttl,
+        proxied: r.proxied, record_id: r.id, cf: true,
+        account_id: +aidStr, zone_id: zid,
+      }));
+      $("#dnsHint").textContent = "Cloudflare DNS 记录";
+    } else {
+      const d = await api(`/api/dnshe/records?account_id=${aidStr}&subdomain_id=${encodeURIComponent(zid)}`);
+      rows = (d.items || []).map(r => ({
+        type: r.type, name: r.name || "@", content: r.content, ttl: r.ttl,
+        proxied: false, record_id: r.record_id || r.id, dnshe: true,
+        account_id: +aidStr, subdomain_id: +zid,
+      }));
+      $("#dnsHint").textContent = "DNSHE 免费域名记录";
+    }
+    $("#recBody").innerHTML = rows.length ? rows.map(r => `<tr>
+        <td><span class="badge b-info">${esc(r.type)}</span></td>
+        <td class="wrap">${esc(r.name)}</td>
+        <td class="wrap ip" onclick="copyText('${esc(String(r.content)).replace(/'/g, "\\'")}')">${esc(String(r.content).slice(0, 60))}</td>
+        <td>${r.ttl}</td>
+        <td>${r.cf ? (r.proxied ? '<span class="badge b-busy">已代理</span>' : '<span class="badge b-stop">仅DNS</span>') : "-"}</td>
+        <td><div class="ops">
+          <button class="btn-ghost" onclick='openRecModal(${JSON.stringify(r).replace(/'/g, "&#39;")})'>编辑</button>
+          <button class="btn-red" onclick="delRecord(${JSON.stringify(r.record_id)})">删除</button>
+        </div></td></tr>`).join("")
+      : `<tr><td colspan="6" class="empty">暂无记录</td></tr>`;
+  } catch (e) {
+    $("#recBody").innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`;
+  }
+}
+
+let recEdit = null;
+function openRecModal(rec) {
+  recEdit = rec || null;
+  $("#recTitle").textContent = rec ? "编辑记录" : "添加记录";
+  $("#rec-id").value = rec?.record_id || "";
+  $("#rec-type").value = rec?.type || "A";
+  $("#rec-name").value = rec ? (rec.dnshe && rec.name === "@" ? "" : (rec.name || "")) : "";
+  $("#rec-content").value = rec?.content || "";
+  $("#rec-ttl").value = rec?.ttl || 300;
+  $("#rec-pri").value = 10;
+  $("#recProxBox").style.display = (!rec || ["A", "CNAME"].includes(rec.type)) && curDnsAcct?.provider === "cloudflare" ? "" : "none";
+  $("#rec-proxied").checked = !!rec?.proxied;
+  show("recModal");
+}
+
+async function saveRecord() {
+  const v = ($("#dnsAcct").value || "");
+  const prov = v.split(":")[0];
+  const aidStr = v.split(":")[1];
+  const type = $("#rec-type").value;
+  const body = {
+    type,
+    name: $("#rec-name").value.trim() || "@",
+    content: $("#rec-content").value.trim(),
+    ttl: +$("#rec-ttl").value || 300,
+  };
+  if (!body.content) return toast("请填写记录内容", "err");
+  try {
+    if (prov === "cloudflare") {
+      const payload = { ...body, account_id: +aidStr, zone_id: curZoneId, proxied: $("#rec-proxied").checked };
+      if (recEdit && recEdit.cf)
+        await api(`/api/cf/records`, { method: "PUT", body: JSON.stringify({ ...payload, record_id: recEdit.record_id }) });
+      else
+        await api(`/api/cf/records`, { method: "POST", body: JSON.stringify(payload) });
+    } else {
+      const payload = { ...body, account_id: +aidStr, subdomain_id: +curZoneId };
+      if (recEdit && recEdit.dnshe)
+        await api(`/api/dnshe/records`, { method: "PUT", body: JSON.stringify({ ...payload, record_id: String(recEdit.record_id) }) });
+      else
+        await api(`/api/dnshe/records`, { method: "POST", body: JSON.stringify(payload) });
+    }
+    hide("recModal"); toast("已保存", "ok"); loadRecords();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function delRecord(recordId) {
+  if (!confirm("确认删除这条 DNS 记录?")) return;
+  const v = ($("#dnsAcct").value || "");
+  const prov = v.split(":")[0], aidStr = v.split(":")[1];
+  try {
+    if (prov === "cloudflare")
+      await api(`/api/cf/records?account_id=${aidStr}&zone_id=${encodeURIComponent(curZoneId)}&record_id=${encodeURIComponent(recordId)}`, { method: "DELETE" });
+    else
+      await api(`/api/dnshe/records?account_id=${aidStr}&subdomain_id=${+curZoneId}&record_id=${encodeURIComponent(recordId)}`, { method: "DELETE" });
+    toast("已删除", "ok"); loadRecords();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- Cloudflare Workers ---- */
+let cfAcctId = null;
+async function loadWorkers() {
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  if (!cfs.length) {
+    $("#wkBody").innerHTML = `<tr><td colspan="5" class="empty">先到「账户设置」添加 Cloudflare 账户</td></tr>`;
+    return;
+  }
+  cfAcctId = cfs[0].id;
+  $("#wkBody").innerHTML = `<tr><td colspan="5" class="empty">加载中…</td></tr>`;
+  try {
+    const d = await api(`/api/cf/workers?account_id=${cfAcctId}`);
+    $("#cfSub").textContent = "Workers.dev 子域:" + (d.subdomain || "-");
+    const items = d.items || [];
+    $("#wkBody").innerHTML = items.length ? items.map(w => `<tr>
+        <td class="ip" onclick="copyText('${esc(w.script_id || w.id)}')">${esc(w.script_id || w.id)}</td>
+        <td>${esc(w.cf_account_name || "-")}</td>
+        <td>${w.created_on ? esc(w.created_on.slice(0, 16)) : "-"}</td>
+        <td>${w.modified_on ? esc(w.modified_on.slice(0, 16)) : "-"}</td>
+        <td><div class="ops">
+          <button class="btn-ghost" onclick="viewWorker('${esc(w.cf_account_id || "")}','${esc(w.script_id || w.id)}')">查看代码</button>
+          <button class="btn-red" onclick="delWorker('${esc(w.cf_account_id || "")}','${esc(w.script_id || w.id)}','${esc((w.script_id || w.id).replace(/'/g, ""))}')">删除</button>
+        </div></td></tr>`).join("")
+      : `<tr><td colspan="5" class="empty">还没有 Worker,点上方「部署新 Worker」或「从 Git 部署」</td></tr>`;
+    loadRoutes();
+  } catch (e) {
+    $("#wkBody").innerHTML = `<tr><td colspan="5" class="empty">${esc(e.message)}</td></tr>`;
+  }
+}
+function openWkModal() {
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  if (!cfs.length) return toast("请先添加 Cloudflare 账户", "err");
+  $("#wk-name").value = ""; $("#wk-code").value = "";
+  show("wkModal");
+}
+async function deployWorker() {
+  const name = $("#wk-name").value.trim();
+  const code = $("#wk-code").value;
+  if (!name || !code.trim()) return toast("请填写脚本名和代码", "err");
+  try {
+    await api("/api/cf/worker-deploy", { method: "POST", body: JSON.stringify({
+      account_id: cfAcctId || acctItems.find(a => a.provider === "cloudflare")?.id,
+      name, code }) });
+    hide("wkModal"); toast("🚀 部署成功", "ok"); loadWorkers();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function viewWorker(cfAccountId, scriptId) {
+  try {
+    const d = await api(`/api/cf/worker-code?account_id=${cfAcctId}&cf_account_id=${encodeURIComponent(cfAccountId)}&script_id=${encodeURIComponent(scriptId)}`);
+    $("#wk-name").value = scriptId; $("#wk-code").value = d.code || "(空)";
+    show("wkModal");
+  } catch (e) { toast(e.message, "err"); }
+}
+async function delWorker(cfAccountId, scriptId, safeName) {
+  if (!confirm(`确认删除 Worker「${scriptId}」?此操作不可恢复!`)) return;
+  try {
+    await api(`/api/cf/worker?account_id=${cfAcctId}&cf_account_id=${encodeURIComponent(cfAccountId)}&script_id=${encodeURIComponent(scriptId)}`, { method: "DELETE" });
+    toast("已删除", "ok"); loadWorkers();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function loadRoutes() {
+  const box = $("#routeBody"), zsel = $("#cfZoneSel");
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  if (!cfs.length) { box.innerHTML = ""; return; }
+  try {
+    if (!zsel.options.length || zsel.dataset.acct !== String(cfs[0].id)) {
+      const d = await api(`/api/cf/zones?account_id=${cfs[0].id}`);
+      cfZonesCache = d.items.map(z => ({ id: z.id, name: z.name }));
+      zsel.innerHTML = cfZonesCache.map(z => `<option value="${esc(z.id)}">${esc(z.name)}</option>`).join("");
+      zsel.dataset.acct = cfs[0].id;
+      $("#rt-script").innerHTML = "";
+    }
+    const zoneSel = $("#cfZoneSel");
+    if (!zoneSel.value) { box.innerHTML = `<p class="hint">无可用域名</p>`; return; }
+    const d = await api(`/api/cf/routes?account_id=${cfs[0].id}&zone_id=${encodeURIComponent(zoneSel.value)}`);
+    const rs = d.items || [];
+    box.innerHTML = rs.length ? `<div class="tblwrap mini-tbl"><table style="min-width:0"><thead><tr><th>模式</th><th>Worker</th><th>操作</th></tr></thead>
+      <tbody>${rs.map(r => `<tr><td class="wrap">${esc(r.pattern)}</td><td>${esc(r.script)}</td>
+      <td><button class="btn-red btn-sm" onclick="delRoute('${esc(r.id)}')">解绑</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="hint">该域名暂无路由绑定</p>`;
+    // worker 下拉
+    const wd = await api(`/api/cf/workers?account_id=${cfs[0].id}`);
+    $("#rt-script").innerHTML = (wd.items || []).map(w => `<option>${esc(w.script_id || w.id)}</option>`).join("");
+  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--amber)">${esc(e.message)}</p>`; }
+}
+async function addRoute() {
+  const pattern = $("#rt-pattern").value.trim();
+  const script = $("#rt-script").value;
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  if (!pattern || !script) return toast("请填路由模式并选择 Worker", "err");
+  try {
+    await api("/api/cf/routes", { method: "POST", body: JSON.stringify({
+      account_id: cfs[0].id, zone_id: $("#cfZoneSel").value, pattern, script }) });
+    toast("路由已绑定", "ok"); $("#rt-pattern").value = ""; loadRoutes();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function delRoute(routeId) {
+  if (!confirm("确认解绑这条路由?")) return;
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  try {
+    await api(`/api/cf/routes?account_id=${cfs[0].id}&zone_id=${encodeURIComponent($("#cfZoneSel").value)}&route_id=${encodeURIComponent(routeId)}`, { method: "DELETE" });
+    toast("已解绑", "ok"); loadRoutes();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- HE DDNS(兼容入口) ---- */
+function openDdnsModal(host, secret) {
+  $("#ddns-host").value = host || ""; $("#ddns-secret").value = secret || ""; $("#ddns-ip").value = "";
+  show("ddnsModal");
+}
+async function runDdns() {
+  const body = {
+    hostname: $("#ddns-host").value.trim(),
+    secret: $("#ddns-secret").value.trim(),
+    ip: $("#ddns-ip").value.trim(),
+  };
+  if (!body.hostname || !body.secret) return toast("请填写主机名与 DDNS Key", "err");
+  try {
+    const d = await api("/api/he/ddns", { method: "POST", body: JSON.stringify(body) });
+    toast("✅ " + (d.message || "DDNS 已更新"), "ok"); hide("ddnsModal");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 账户弹窗辅助 ================= */
+let curProvider = "oci";
+const PROV_LABELS = { oci: "Oracle Cloud", aws: "AWS", cloudflare: "Cloudflare", dnshe: "DNSHE" };
+function setProvider(p, silent) {
+  curProvider = p;
+  Object.keys(PROV_LABELS).forEach(k => {
+    const chip = document.getElementById("pc-" + k);
+    if (chip) chip.classList.toggle("on", k === p);
+    const pv = document.getElementById("pv-" + k);
+    if (pv) pv.hidden = k !== p;
+  });
+}
+function parseOfficial() {
+  const txt = $("#am-config").value || "";
+  const get = k => { const m = txt.match(new RegExp("^\\s*" + k + "\\s*=\\s*(.+)$", "m")); return m ? m[1].trim() : ""; };
+  if (get("user")) $("#f-user").value = get("user");
+  if (get("tenancy")) $("#f-tenancy").value = get("tenancy");
+  if (get("fingerprint")) $("#f-fp").value = get("fingerprint");
+  if (get("region")) $("#f-region").value = get("region");
+  toast("已解析填充,别忘了上传 .pem 私钥文件", "ok");
+}
+function loadPemFile(input) {
+  const f = input.files?.[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    $("#f-key").value = String(reader.result || "");
+    $("#am-pemname").textContent = "✅ 已读取 " + f.name;
+  };
+  reader.readAsText(f);
+}
+async function checkAcct(id, name) {
+  toast("正在测活:" + name + " …");
+  try {
+    const d = await api(`/api/accounts/${id}/check`);
+    if (d.remote_ok === undefined) {
+      toast(`✅ ${name}:指纹匹配${d.match ? "" : "失败"} ` + (d.hint || ""), "err");
+      return;
+    }
+    if (d.remote_ok) toast(`✅ ${name}(${d.provider})连接正常 ` + (d.hint || ""), "ok");
+    else toast(`❌ ${name}(${d.provider}):` + (d.error || "失败") + "\n" + (d.hint || ""), "err");
+  } catch (e) { toast("测活失败:" + e.message, "err"); }
+}
+async function changePw() {
+  const oldv = $("#pw-old").value, newv = $("#pw-new").value;
+  if (!oldv || newv.length < 6) return toast("新密码至少 6 位", "err");
+  try {
+    await api("/api/password", { method: "POST", body: JSON.stringify({ old: oldv, new: newv }) });
+    toast("密码已修改,下次登录生效", "ok");
+    $("#pw-old").value = ""; $("#pw-new").value = "";
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 守护中心 TG ================= */
+async function loadTg() {
+  try { const d = await api("/api/guardian/tg");
+    $("#tg-token").value = d.bot_token || ""; $("#tg-chat").value = d.chat_id || ""; } catch {}
+}
+async function saveTg() {
+  try {
+    await api("/api/guardian/tg", { method: "POST", body: JSON.stringify({
+      bot_token: $("#tg-token").value.trim(), chat_id: $("#tg-chat").value.trim() }) });
+    toast("TG 配置已保存", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+async function testTg() {
+  try { await api("/api/guardian/tg-test", { method: "POST" }); toast("📤 测试消息已发送,请在 Telegram 查看", "ok"); }
+  catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= OCI 监控一键开启 ================= */
+async function enableMonitoring() {
+  if (!curIdx && curIdx !== 0) return;
+  const i = instItems[curIdx];
+  try {
+    await api("/api/instances/enable-monitoring", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, compartment_id: i.compartment_id, instance_id: i.id }) });
+    toast("监控插件已开启,约 5~10 分钟后出数据", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
 /* ================= 启动 ================= */
 async function loadAll(notify) {
-  try { await Promise.all([loadInstances(), loadAccounts()]); }
+  try { await Promise.all([loadInstances(), loadAccounts(), loadVps()]); }
   catch (e) { if (notify && e.message !== "请先登录") toast(e.message, "err"); }
 }
 (async () => {
