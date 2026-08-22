@@ -392,6 +392,8 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
             <option value="password">密码</option>
             <option value="key">SSH 私钥</option>
           </select></div>
+        <div style="grid-column:1/-1"><button class="btn-ghost btn-sm" onclick="sshListSaved()">📋 该 IP 已保存的凭据</button>
+          <span id="ssh-savedlist" class="hint"></span></div>
         <div style="grid-column:1/-1"><label id="ssh-label">密码</label>
           <textarea id="ssh-secret" style="min-height:60px" placeholder="密码或 PEM 私钥"></textarea></div>
         <div style="grid-column:1/-1"><label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
@@ -427,6 +429,8 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
             <option value="password">密码</option>
             <option value="key">SSH 私钥</option>
           </select></div>
+        <div style="grid-column:1/-1"><button class="btn-ghost btn-sm" onclick="sftpListSaved()">📋 该 IP 已保存的凭据</button>
+          <span id="sftp-savedlist" class="hint"></span></div>
         <div style="grid-column:1/-1"><label id="sftp-label">密码</label>
           <textarea id="sftp-secret" style="min-height:60px" placeholder="密码或 PEM 私钥"></textarea></div>
         <div style="grid-column:1/-1"><label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
@@ -1616,18 +1620,33 @@ function openSshModal(idx) {
   $("#ssh-auth").value = "password";
   $("#ssh-label").textContent = "密码";
   $("#ssh-savecred").checked = false;
+  // 已登记 VPS:自动带上保存的用户名/端口/认证方式
+  if (curSshItem?.provider === "vps") {
+    const v = vpsByIdx(idx);
+    if (v?.username) {
+      $("#ssh-host").value = v.host || curSshItem.public_ip || "";
+      $("#ssh-port").value = v.port || 22;
+      $("#ssh-user").value = v.username;
+      $("#ssh-auth").value = v.auth_type || "password";
+      $("#ssh-label").textContent = v.auth_type === "key" ? "SSH 私钥" : "密码";
+      $("#ssh-secret").placeholder = "● 已登记VPS可用面板凭据 — 留空直接连接";
+      sshStatus("● 已登记 VPS,留空密码即可连接","ok");
+    }
+  }
   $("#sshForm").hidden = false;
   $("#sshWrap").hidden = true;
-  sshStatus("未连接");
   show("sshModal");
   setTimeout(() => { try{ sshTerm && sshFit && sshFit.fit(); }catch{} }, 80);
+  // 按 IP 列出已保存凭据,自动补全用户名
+  sshListSaved();
 }
 async function sshProbeSaved() {
-  // 主机/用户填完后自动探测:有保存凭据就预填(密码框显示占位,不回显明文)
+  // 主机/用户填完后自动探测:有保存凭据就提示留空直连,并自动补全用户名
   const host = $("#ssh-host").value.trim(), user = $("#ssh-user").value.trim();
   if (!host || !user) return;
   try {
     const d = await api(`/api/vps/saved-cred?u=${encodeURIComponent(user)}&h=${encodeURIComponent(host)}&p=${+$("#ssh-port").value || 22}`);
+    if (d.username && !$("#ssh-user").value.trim()) $("#ssh-user").value = d.username;
     $("#ssh-auth").value = d.auth_type || "password";
     $("#ssh-label").textContent = d.auth_type === "key" ? "SSH 私钥" : "密码";
     $("#ssh-secret").value = "";
@@ -1636,6 +1655,29 @@ async function sshProbeSaved() {
   } catch {
     $("#ssh-secret").placeholder = "密码或 PEM 私钥";
   }
+}
+async function sshListSaved() {
+  // 打开弹窗自动调用:按 IP 匹配已保存凭据,唯一则自动填用户名,多条则显示 chips
+  const host = $("#ssh-host").value.trim();
+  const box = $("#ssh-savedlist");
+  if (!box) return;
+  if (!host) { box.textContent = ""; return; }
+  try {
+    const d = await api("/api/vps/saved-cred/list");
+    const hits = (d.items || []).filter(x => x.host === host);
+    if (!hits.length) { box.textContent = ""; return; }
+    if (hits.length === 1 && !$("#ssh-user").value.trim()) {
+      $("#ssh-user").value = hits[0].username;
+      $("#ssh-auth").value = hits[0].auth_type || "password";
+      $("#ssh-label").textContent = hits[0].auth_type === "key" ? "SSH 私钥" : "密码";
+      $("#ssh-secret").placeholder = "● 已保存凭据 — 留空直接连接";
+      sshStatus("● 该主机已有保存的凭据,留空密码即可连接","ok");
+      box.textContent = "已自动填入用户 " + hits[0].username;
+    } else if (hits.length > 1) {
+      box.innerHTML = hits.map(x =>
+        `<span class="chip ip" onclick="$('#ssh-user').value='${esc(x.username)}';sshProbeSaved()">${esc(x.username)} · ${x.auth_type === "key" ? "私钥" : "密码"}</span>`).join("");
+    }
+  } catch (e) { box.textContent = ""; }
 }
 function sshEnsureTerm() {
   if (sshTerm) return true;
@@ -1740,9 +1782,42 @@ function openSftpModal(idx) {
   $("#sftp-auth").value = "password";
   $("#sftp-label").textContent = "密码";
   $("#sftp-savecred").checked = false;
+  if (curSftpItem?.provider === "vps") {
+    const v = vpsByIdx(idx);
+    if (v?.username) {
+      $("#sftp-host").value = v.host || curSftpItem.public_ip || "";
+      $("#sftp-port").value = v.port || 22;
+      $("#sftp-user").value = v.username;
+      $("#sftp-auth").value = v.auth_type || "password";
+      $("#sftp-label").textContent = v.auth_type === "key" ? "SSH 私钥" : "密码";
+      $("#sftp-secret").placeholder = "● 已登记VPS可用面板凭据 — 留空直接连接";
+    }
+  }
   $("#sftpLogin").hidden = false; $("#sftpMain").hidden = true;
   $("#sftp-status").textContent = "";
   show("sftpModal");
+  sftpListSaved();
+}
+async function sftpListSaved() {
+  const host = $("#sftp-host").value.trim();
+  const box = $("#sftp-savedlist");
+  if (!box) return;
+  if (!host) { box.textContent = ""; return; }
+  try {
+    const d = await api("/api/vps/saved-cred/list");
+    const hits = (d.items || []).filter(x => x.host === host);
+    if (!hits.length) { box.textContent = ""; return; }
+    if (hits.length === 1 && !$("#sftp-user").value.trim()) {
+      $("#sftp-user").value = hits[0].username;
+      $("#sftp-auth").value = hits[0].auth_type || "password";
+      $("#sftp-label").textContent = hits[0].auth_type === "key" ? "SSH 私钥" : "密码";
+      $("#sftp-secret").placeholder = "● 已保存凭据 — 留空直接连接";
+      box.textContent = "已自动填入用户 " + hits[0].username;
+    } else if (hits.length > 1) {
+      box.innerHTML = hits.map(x =>
+        `<span class="chip ip" onclick="$('#sftp-user').value='${esc(x.username)}';sftpProbeSaved()">${esc(x.username)} · ${x.auth_type === "key" ? "私钥" : "密码"}</span>`).join("");
+    }
+  } catch (e) { box.textContent = ""; }
 }
 async function sftpProbeSaved() {
   const host = $("#sftp-host").value.trim(), user = $("#sftp-user").value.trim();
@@ -1978,7 +2053,7 @@ async function loadRecords() {
       const d = await api(`/api/cf/records?account_id=${aidStr}&zone_id=${encodeURIComponent(zid)}`);
       rows = d.items.map(r => ({
         type: r.type, name: r.name, content: r.content, ttl: r.ttl,
-        proxied: r.proxied, record_id: r.id, cf: true,
+        proxied: r.proxied, record_id: r.record_id || r.id, cf: true,
         account_id: +aidStr, zone_id: zid,
       }));
       $("#dnsHint").textContent = "Cloudflare DNS 记录";
@@ -2053,6 +2128,7 @@ async function saveRecord() {
 }
 
 async function delRecord(recordId) {
+  if (!recordId) return toast("记录 ID 为空,请先刷新列表再试", "err");
   if (!confirm("确认删除这条 DNS 记录?")) return;
   const v = ($("#dnsAcct").value || "");
   const prov = v.split(":")[0], aidStr = v.split(":")[1];
