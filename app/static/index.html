@@ -386,7 +386,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <div class="grid2">
         <div><label>主机地址</label><input id="ssh-host" placeholder="1.2.3.4"></div>
         <div><label>端口</label><input id="ssh-port" type="number" value="22"></div>
-        <div><label>用户名</label><input id="ssh-user" placeholder="root"></div>
+        <div><label>用户名</label><input id="ssh-user" placeholder="root" onchange="sshProbeSaved()"></div>
         <div><label>认证方式</label>
           <select id="ssh-auth" onchange="document.getElementById('ssh-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
             <option value="password">密码</option>
@@ -394,8 +394,10 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
           </select></div>
         <div style="grid-column:1/-1"><label id="ssh-label">密码</label>
           <textarea id="ssh-secret" style="min-height:60px" placeholder="密码或 PEM 私钥"></textarea></div>
+        <div style="grid-column:1/-1"><label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
+          <input type="checkbox" id="ssh-savecred" style="width:auto"> 💾 保存凭据到面板(加密存储,下次免输入)</label></div>
       </div>
-      <p class="hint">凭据只保存在浏览器内存,关闭页面即清除。已登记的 VPS 可直接用保存的凭据连接。</p>
+      <p class="hint">不勾选则凭据只保存在浏览器内存,关闭页面即清除;已保存凭据的主机,密码框留空即可直连。</p>
     </div>
     <div id="sshWrap" hidden>
       <div style="position:relative;background:#0a0f15;border:1px solid var(--line);border-radius:10px;padding:6px;height:56vh;min-height:360px">
@@ -419,7 +421,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <div class="grid2">
         <div><label>主机地址</label><input id="sftp-host" placeholder="1.2.3.4"></div>
         <div><label>端口</label><input id="sftp-port" type="number" value="22"></div>
-        <div><label>用户名</label><input id="sftp-user" placeholder="root"></div>
+        <div><label>用户名</label><input id="sftp-user" placeholder="root" onchange="sftpProbeSaved()"></div>
         <div><label>认证方式</label>
           <select id="sftp-auth" onchange="document.getElementById('sftp-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
             <option value="password">密码</option>
@@ -427,8 +429,10 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
           </select></div>
         <div style="grid-column:1/-1"><label id="sftp-label">密码</label>
           <textarea id="sftp-secret" style="min-height:60px" placeholder="密码或 PEM 私钥"></textarea></div>
+        <div style="grid-column:1/-1"><label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
+          <input type="checkbox" id="sftp-savecred" style="width:auto"> 💾 保存凭据到面板(加密存储,下次免输入)</label></div>
       </div>
-      <p class="hint">与终端一致:凭据仅存于浏览器内存。</p>
+      <p class="hint">不勾选则凭据仅存于浏览器内存;已保存凭据的主机,密码框留空即可直连。</p>
     </div>
     <div id="sftpMain" hidden>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -1611,11 +1615,27 @@ function openSshModal(idx) {
   $("#ssh-secret").value = "";
   $("#ssh-auth").value = "password";
   $("#ssh-label").textContent = "密码";
+  $("#ssh-savecred").checked = false;
   $("#sshForm").hidden = false;
   $("#sshWrap").hidden = true;
   sshStatus("未连接");
   show("sshModal");
   setTimeout(() => { try{ sshTerm && sshFit && sshFit.fit(); }catch{} }, 80);
+}
+async function sshProbeSaved() {
+  // 主机/用户填完后自动探测:有保存凭据就预填(密码框显示占位,不回显明文)
+  const host = $("#ssh-host").value.trim(), user = $("#ssh-user").value.trim();
+  if (!host || !user) return;
+  try {
+    const d = await api(`/api/vps/saved-cred?u=${encodeURIComponent(user)}&h=${encodeURIComponent(host)}&p=${+$("#ssh-port").value || 22}`);
+    $("#ssh-auth").value = d.auth_type || "password";
+    $("#ssh-label").textContent = d.auth_type === "key" ? "SSH 私钥" : "密码";
+    $("#ssh-secret").value = "";
+    $("#ssh-secret").placeholder = "● 已保存凭据 — 留空直接连接";
+    sshStatus("● 该主机已有保存的凭据,留空密码即可连接","ok");
+  } catch {
+    $("#ssh-secret").placeholder = "密码或 PEM 私钥";
+  }
 }
 function sshEnsureTerm() {
   if (sshTerm) return true;
@@ -1638,7 +1658,7 @@ function sshStatus(txt, cls) {
   const el = document.getElementById("ssh-status");
   if (el) { el.textContent = txt; el.className = "term-status " + (cls||""); }
 }
-function sshConnect() {
+async function sshConnect() {
   const host = document.getElementById("ssh-host").value.trim();
   const port = +document.getElementById("ssh-port").value || 22;
   const user = document.getElementById("ssh-user").value.trim();
@@ -1647,7 +1667,21 @@ function sshConnect() {
   if (!host || !user) return toast("请填写主机和用户名","err");
   // 已登记 VPS 且没重新输入凭据 → 用面板加密存储的凭据
   const useSaved = !secret.trim() && curSshItem?.provider === "vps" && curSshItem?.vps_id;
-  if (!secret.trim() && !useSaved) return toast("请输入密码或私钥(已登记 VPS 可留空用已存凭据)","err");
+  // 凭据库有该主机且没重新输入 → 用凭据库
+  let useCredLib = false;
+  if (!secret.trim() && !useSaved) {
+    try { await api(`/api/vps/saved-cred?u=${encodeURIComponent(user)}&h=${encodeURIComponent(host)}&p=${port}`); useCredLib = true; }
+    catch { /* 没保存过 */ }
+  }
+  if (!secret.trim() && !useSaved && !useCredLib) return toast("请输入密码或私钥(或勾选保存凭据后重输一次)","err");
+  // 勾选了保存 → 先把凭据写入面板(加密),再连接
+  if ($("#ssh-savecred").checked && secret.trim()) {
+    try {
+      await api("/api/vps/saved-cred", { method: "POST", body: JSON.stringify({
+        name: curSshItem?.name || host, host, port, username: user, auth_type: auth, secret }) });
+      toast("💾 凭据已加密保存到面板", "ok");
+    } catch (e) { toast("保存凭据失败:" + e.message, "err"); }
+  }
   if (!sshEnsureTerm()) return;
   sshDisconnect();
   sshStatus("连接中…");
@@ -1655,6 +1689,8 @@ function sshConnect() {
   sshWs = new WebSocket(`${proto}://${location.host}/ws/ssh`);
   sshWs.onopen = () => sshWs.send(JSON.stringify(useSaved
     ? {type:"open",use_saved:true,vps_id:curSshItem.vps_id,cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}
+    : useCredLib
+    ? {type:"open",use_saved_cred:true,host,port,username:user,cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}
     : {type:"open",host,port,username:user,auth,secret,cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}));
   sshWs.onmessage = ev => {
     let m; try{m=JSON.parse(ev.data);}catch{return;}
@@ -1703,13 +1739,26 @@ function openSftpModal(idx) {
   $("#sftp-secret").value = "";
   $("#sftp-auth").value = "password";
   $("#sftp-label").textContent = "密码";
+  $("#sftp-savecred").checked = false;
   $("#sftpLogin").hidden = false; $("#sftpMain").hidden = true;
   $("#sftp-status").textContent = "";
   show("sftpModal");
 }
+async function sftpProbeSaved() {
+  const host = $("#sftp-host").value.trim(), user = $("#sftp-user").value.trim();
+  if (!host || !user) return;
+  try {
+    const d = await api(`/api/vps/saved-cred?u=${encodeURIComponent(user)}&h=${encodeURIComponent(host)}&p=${+$("#sftp-port").value || 22}`);
+    $("#sftp-auth").value = d.auth_type || "password";
+    $("#sftp-label").textContent = d.auth_type === "key" ? "SSH 私钥" : "密码";
+    $("#sftp-secret").placeholder = "● 已保存凭据 — 留空直接连接";
+  } catch {
+    $("#sftp-secret").placeholder = "密码或 PEM 私钥";
+  }
+}
 function sftpSetStatus(t) { const el = $("#sftp-status"); if (el) el.textContent = t; }
 function sftpDisconnect() { if (sftpWs) { try{sftpWs.close();}catch{} sftpWs=null; } sftpDl=null; sftpUpBuf=null; }
-function sftpConnect() {
+async function sftpConnect() {
   const host = $("#sftp-host").value.trim();
   const user = $("#sftp-user").value.trim();
   const secret = $("#sftp-secret").value;
@@ -1717,12 +1766,26 @@ function sftpConnect() {
   const port = +$("#sftp-port").value || 22;
   if (!host || !user) return toast("请填写主机和用户名","err");
   const useSaved = !secret.trim() && curSftpItem?.provider === "vps" && curSftpItem?.vps_id;
-  if (!secret.trim() && !useSaved) return toast("请输入密码或私钥(已登记 VPS 可留空用已存凭据)","err");
+  let useCredLib = false;
+  if (!secret.trim() && !useSaved) {
+    try { await api(`/api/vps/saved-cred?u=${encodeURIComponent(user)}&h=${encodeURIComponent(host)}&p=${port}`); useCredLib = true; }
+    catch {}
+  }
+  if (!secret.trim() && !useSaved && !useCredLib) return toast("请输入密码或私钥(或勾选保存凭据后重输一次)","err");
+  if ($("#sftp-savecred").checked && secret.trim()) {
+    try {
+      await api("/api/vps/saved-cred", { method: "POST", body: JSON.stringify({
+        name: curSftpItem?.name || host, host, port, username: user, auth_type: auth, secret }) });
+      toast("💾 凭据已加密保存到面板", "ok");
+    } catch (e) { toast("保存凭据失败:" + e.message, "err"); }
+  }
   sftpSetStatus("连接中…");
   const proto = location.protocol === "https:" ? "wss" : "ws";
   sftpWs = new WebSocket(`${proto}://${location.host}/ws/sftp`);
   sftpWs.onopen = () => sftpWs.send(JSON.stringify(useSaved
     ? {type:"open",use_saved:true,vps_id:curSftpItem.vps_id}
+    : useCredLib
+    ? {type:"open",use_saved_cred:true,host,port,username:user}
     : {type:"open",host,port,username:user,auth,secret}));
   sftpWs.onmessage = ev => sftpHandle(ev);
   sftpWs.onclose = () => { if ($("#sftpMain") && !$("#sftpMain").hidden) sftpSetStatus("(连接已断开)"); };

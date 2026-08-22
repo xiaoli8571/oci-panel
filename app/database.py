@@ -47,6 +47,14 @@ CREATE TABLE IF NOT EXISTS vps_hosts(
     note             TEXT DEFAULT '',
     created_at       TEXT DEFAULT (datetime('now', 'localtime'))
 );
+CREATE TABLE IF NOT EXISTS ssh_creds(
+    cred_key         TEXT PRIMARY KEY,
+    username         TEXT NOT NULL,
+    host             TEXT NOT NULL,
+    port             INTEGER DEFAULT 22,
+    auth_type        TEXT DEFAULT 'password',
+    secret_enc       TEXT NOT NULL
+);
 """
 
 

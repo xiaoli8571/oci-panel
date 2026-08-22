@@ -25,7 +25,18 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .. import config, security
 from ..database import db
 from ..pcreds import ProviderError
-from ..routers.vps import _creds, _get_row
+from ..routers.vps import _creds, _get_row, _cred_key
+
+
+def _lookup_saved_cred(username: str, host: str, port: int):
+    """从凭据库取明文凭据;返回 (auth_type, secret) 或 None。"""
+    k = _cred_key(username, host, port)
+    with db() as c:
+        row = c.execute("SELECT auth_type,secret_enc FROM ssh_creds WHERE cred_key=?", (k,)).fetchone()
+    if not row or not row["secret_enc"]:
+        return None
+    return (row["auth_type"] or "password"), security.decrypt(row["secret_enc"])
+
 
 log = logging.getLogger("wssh")
 
@@ -115,6 +126,19 @@ async def ws_ssh(websocket: WebSocket):
                     secret_plain, vkw = _creds(row)
                     host, port, user = row["host"], int(vkw.pop("port")), str(vkw.pop("username"))
                     kw = dict(vkw)
+                elif msg.get("use_saved_cred") and msg.get("host"):
+                    # 按 user@host:port 从 SSH 凭据库取
+                    host = str(msg["host"]); port = int(msg.get("port", 22)); user = str(msg["username"])
+                    saved = _lookup_saved_cred(user, host, port)
+                    if not saved:
+                        await _send(websocket, type="error", message="凭据库里没有这台主机的保存凭据")
+                        continue
+                    auth_t, sec = saved
+                    kw = dict(port=port, username=user, known_hosts=None)
+                    if auth_t == "key":
+                        kw["client_keys"] = [asyncssh.import_private_key(sec)]
+                    else:
+                        kw["password"] = sec
                 else:
                     host = str(msg["host"]); port = int(msg.get("port", 22))
                     user = str(msg["username"])
@@ -279,6 +303,17 @@ async def ws_sftp(websocket: WebSocket):
             return await asyncio.wait_for(
                 asyncssh.connect(host, port=port, username=username,
                                  known_hosts=None, **vkw), timeout=20)
+        if msg.get("use_saved_cred") and msg.get("host"):
+            saved = _lookup_saved_cred(str(msg["username"]), str(msg["host"]), int(msg.get("port", 22)))
+            if not saved:
+                raise ProviderError("凭据库里没有这台主机的保存凭据")
+            auth_t, sec = saved
+            kw = dict(port=int(msg.get("port", 22)), username=str(msg["username"]), known_hosts=None)
+            if auth_t == "key":
+                kw["client_keys"] = [asyncssh.import_private_key(sec)]
+            else:
+                kw["password"] = sec
+            return await asyncio.wait_for(asyncssh.connect(str(msg["host"]), **kw), timeout=20)
         kw = dict(port=int(msg.get("port", 22)), username=str(msg["username"]), known_hosts=None)
         if msg.get("auth") == "key":
             kw["client_keys"] = [asyncssh.import_private_key(msg["secret"])]

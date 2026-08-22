@@ -160,6 +160,60 @@ async def reboot_vps(host_id: int):
             pass
 
 
+# ---------- SSH 凭据库(任意主机可保存凭据,与 VPS 登记解耦) ----------
+
+def _cred_key(username: str, host: str, port: int) -> str:
+    return f"{username}@{host}:{int(port or 22)}"
+
+
+@router.get("/saved-cred")
+def get_saved_cred(u: str, h: str, p: int = 22):
+    """返回某主机已保存的凭据(明文,仅登录会话可取;前端填表用)。"""
+    k = _cred_key(u, h, p)
+    with db() as c:
+        row = c.execute("SELECT username,auth_type,secret_enc FROM ssh_creds WHERE cred_key=?", (k,)).fetchone()
+    if not row or not row["secret_enc"]:
+        raise HTTPException(404, "该主机没有保存过凭据")
+    try:
+        secret = security.decrypt(row["secret_enc"])
+    except Exception as e:  # noqa: BLE001
+        raise ProviderError(f"凭据解密失败:{e}")
+    return {"username": row["username"], "auth_type": row["auth_type"] or "password", "secret": secret}
+
+
+@router.post("/saved-cred")
+def save_cred(body: VpsHostIn):
+    if body.auth_type not in ("password", "key"):
+        raise HTTPException(400, "auth_type 必须是 password 或 key")
+    if not body.secret.strip():
+        raise HTTPException(400, "凭据内容不能为空")
+    enc = security.encrypt(body.secret)
+    k = _cred_key(body.username.strip(), body.host.strip(), body.port)
+    with db() as c:
+        c.execute(
+            "INSERT INTO ssh_creds(cred_key,username,host,port,auth_type,secret_enc)"
+            " VALUES(?,?,?,?,?,?)"
+            " ON CONFLICT(cred_key) DO UPDATE SET auth_type=excluded.auth_type,"
+            " secret_enc=excluded.secret_enc",
+            (k, body.username.strip(), body.host.strip(), body.port, body.auth_type, enc))
+    return {"ok": True}
+
+
+@router.delete("/saved-cred")
+def delete_cred(u: str, h: str, p: int = 22):
+    with db() as c:
+        c.execute("DELETE FROM ssh_creds WHERE cred_key=?", (_cred_key(u, h, p),))
+    return {"ok": True}
+
+
+@router.get("/saved-cred/list")
+def list_saved_creds():
+    """凭据清单(不含明文):供弹窗提示「该主机已有保存凭据」。"""
+    with db() as c:
+        rows = c.execute("SELECT cred_key,username,host,port,auth_type FROM ssh_creds ORDER BY host").fetchall()
+    return {"items": [dict(r) for r in rows]}
+
+
 # ---------- 实例列表合并用的行构造 ----------
 
 def list_vps_rows() -> list[dict]:
