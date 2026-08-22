@@ -2074,7 +2074,7 @@ async function loadRecords() {
         <td>${r.cf ? (r.proxied ? '<span class="badge b-busy">已代理</span>' : '<span class="badge b-stop">仅DNS</span>') : "-"}</td>
         <td><div class="ops">
           <button class="btn-ghost" onclick='openRecModal(${JSON.stringify(r).replace(/'/g, "&#39;")})'>编辑</button>
-          <button class="btn-red" onclick="delRecord(${JSON.stringify(r.record_id)})">删除</button>
+          <button class="btn-red" onclick='delRecord(${JSON.stringify(r.record_id).replace(/'/g, "&#39;")})'>删除</button>
         </div></td></tr>`).join("")
       : `<tr><td colspan="6" class="empty">暂无记录</td></tr>`;
   } catch (e) {
