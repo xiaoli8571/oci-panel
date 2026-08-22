@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1319">
+<title>OCI Manage Lite · 云管理面板</title>
+<link rel="stylesheet" href="/static/vendor/xterm.min.css">
+<script src="/static/vendor/xterm.min.js"></script>
+<script src="/static/vendor/addon-fit.min.js"></script>
+<style>
+:root{
+  --bg:#0e1319; --panel:#161d27; --panel2:#1c2532; --line:#263140;
+  --text:#dbe4ee; --muted:#8296ab; --accent:#4f8cff; --accent2:#2f6fe0;
+  --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --cyan:#22d3ee; --purple:#a78bfa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;border:none;border-radius:6px;font:inherit;color:#fff;background:var(--accent);padding:7px 14px;transition:.15s}
+button:hover{filter:brightness(1.12)}
+button:disabled{opacity:.4;cursor:not-allowed}
+input,select,textarea{width:100%;background:#0f1620;border:1px solid var(--line);border-radius:6px;color:var(--text);padding:8px 10px;font:inherit;outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:110px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+label{display:block;color:var(--muted);font-size:12px;margin:10px 0 4px}
+header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;padding:0 22px;height:56px;background:rgba(15,20,27,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.brand{font-weight:700;font-size:16px;letter-spacing:.5px;white-space:nowrap}
+.brand span{color:var(--accent)}
+nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+nav button{background:transparent;color:var(--muted);padding:6px 14px}
+nav button.active{background:var(--panel2);color:var(--text)}
+header .right{display:flex;gap:8px}
+.btn-ghost{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.btn-ghost:hover{color:var(--text)}
+main{max-width:1320px;margin:0 auto;padding:22px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.toolbar .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 14px;color:var(--muted)}
+.toolbar .stat b{color:var(--text);margin-left:4px}
+.spacer{flex:1}
+.tblwrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;min-width:1080px}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:500;font-size:12px;background:var(--panel2);position:sticky;top:0}
+tbody tr:hover{background:#1a2330}
+tbody tr:last-child td{border-bottom:none}
+td.wrap{white-space:normal}
+.ip{font-family:ui-monospace,Consolas,monospace;cursor:pointer}
+.ip:hover{color:var(--accent)}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.b-run{background:rgba(34,197,94,.15);color:var(--green)}
+.b-stop{background:rgba(130,150,171,.15);color:var(--muted)}
+.b-busy{background:rgba(245,158,11,.15);color:var(--amber)}
+.b-err{background:rgba(239,68,68,.15);color:var(--red)}
+.b-info{background:rgba(79,140,255,.15);color:var(--accent)}
+.b-cyan{background:rgba(34,211,238,.15);color:var(--cyan)}
+.b-purple{background:rgba(167,139,250,.18);color:var(--purple)}
+.ops{display:flex;gap:5px;flex-wrap:wrap;max-width:340px}
+.ops button{padding:3px 8px;font-size:12px;border-radius:5px}
+.btn-warn{background:#b45309}
+.btn-red{background:var(--red)}
+.btn-cyan{background:#0e7490}
+.btn-green{background:#15803d}
+.btn-purple{background:#6d28d9}
+.mask{position:fixed;inset:0;background:rgba(5,8,12,.7);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow:auto}
+.mask.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:100%;max-width:560px;padding:22px}
+.modal.wide{max-width:880px}
+.modal h3{margin-bottom:6px;font-size:16px}
+.modal .sub{color:var(--muted);font-size:12px;margin-bottom:8px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+.modal .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;align-items:center}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.chip{border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:20px;padding:5px 14px;font-size:12px;cursor:pointer}
+.chip.on{border-color:var(--accent);color:var(--text);background:rgba(79,140,255,.15)}
+.sec{border-top:1px dashed var(--line);margin-top:16px;padding-top:12px}
+.sec h4{font-size:13px;margin-bottom:8px;color:var(--accent)}
+pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;padding:12px;max-height:300px;overflow:auto;font-size:12px;line-height:1.8;white-space:pre-wrap;word-break:break-all}
+#toasts{position:fixed;right:18px;bottom:18px;z-index:99;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:10px 16px;min-width:220px;max-width:420px;box-shadow:0 6px 24px rgba(0,0,0,.4);animation:in .2s}
+.toast.err{border-left-color:var(--red)}
+.toast.ok{border-left-color:var(--green)}
+@keyframes in{from{transform:translateY(8px);opacity:0}}
+#loginMask{position:fixed;inset:0;background:radial-gradient(1200px 600px at 50% -10%,#16233a,var(--bg));display:none;align-items:center;justify-content:center;z-index:100}
+#loginMask.show{display:flex}
+.login-card{width:340px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:30px;text-align:center}
+.login-card .logo{font-size:34px}
+.login-card h2{margin:8px 0 2px}
+.login-card p{color:var(--muted);font-size:12px;margin-bottom:18px}
+.err-text{color:var(--red);font-size:12px;min-height:18px;margin-top:8px}
+#trafCanvas{width:100%;height:260px;background:#0a0f15;border:1px solid var(--line);border-radius:8px}
+.traf-sum{display:flex;gap:14px;margin-top:12px;flex-wrap:wrap;color:var(--muted)}
+.traf-sum b{color:var(--text)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.hint{color:var(--muted);font-size:12px;margin-top:10px}
+.qcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.qcard h4{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px;margin:8px 0}
+.kv span{color:var(--muted)}
+.mini-tbl{min-width:0}
+.mini-tbl table{min-width:0}
+.mini-tbl th,.mini-tbl td{padding:6px 10px;font-size:12px}
+.ssh-layout{display:grid;grid-template-columns:280px 1fr;gap:14px;height:calc(100vh - 130px)}
+@media(max-width:800px){.ssh-layout{grid-template-columns:1fr;height:auto}}
+.ssh-side{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;max-height:100%}
+.host-item{display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.host-item .hi-main{cursor:pointer;flex:1;min-width:0}
+.host-item b{display:block;font-size:13px}
+.host-item span{color:var(--muted);font-size:11px;word-break:break-all}
+.hi-ops{display:flex;gap:4px;margin-left:8px}
+.hi-ops button{padding:2px 7px;font-size:11px}
+#sshRight{height:100%;display:flex;flex-direction:column}
+#termTabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.term-tab{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
+.term-tab.on{border-color:var(--accent)}
+.term-tab .x{color:var(--muted)} .term-tab .x:hover{color:var(--red)}
+#termArea{flex:1;min-height:420px}
+.term-wrap{position:relative;background:#0a0f15;border:1px solid var(--line);border-radius:10px;height:100%;padding:6px;display:none}
+.term-view{height:calc(100% - 0px)}
+.term-status{position:absolute;top:10px;right:16px;z-index:5;font-size:11px;color:var(--muted);background:rgba(10,15,21,.75);padding:2px 8px;border-radius:10px}
+.term-status.ok{color:var(--green)} .term-status.err{color:var(--red)}
+.ev-line{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--line);font-size:13px;flex-wrap:wrap}
+
+/* ================= 移动端适配 ================= */
+@media (max-width: 860px){
+  html,body{overflow-x:hidden}
+  /* 头部:两行布局,导航横滑 */
+  header{flex-wrap:wrap;height:auto;padding:8px 12px;row-gap:4px}
+  .brand{font-size:15px}
+  nav{order:3;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;flex-wrap:nowrap}
+  nav::-webkit-scrollbar{display:none}
+  nav button{flex:0 0 auto;padding:9px 14px;font-size:14px}
+  header .right{margin-left:auto}
+  header .right button{padding:8px 12px}
+
+  main{padding:12px}
+  .toolbar{gap:6px;margin-bottom:10px}
+  .toolbar .stat{padding:5px 10px;font-size:12px}
+  button{min-height:38px;padding:8px 14px}
+  .ops button{min-height:34px}
+
+  th,td{padding:8px 9px;font-size:13px}
+  table:not(.mini-tbl table):not(#instTable){min-width:640px}
+
+  /* 实例表 → 卡片 */
+  #instTable{min-width:0!important}
+  #instHead{display:none}
+  #instBody tr{display:block;border-bottom:1px dashed var(--line);padding:10px 4px;background:transparent}
+  #instBody tr:last-child{border-bottom:none}
+  #instBody td{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border:none;padding:5px 6px;white-space:normal}
+  #instBody td::before{content:attr(data-l);color:var(--muted);font-size:12px;flex:0 0 62px}
+  #instBody td.cell-ops{display:block}
+  #instBody td.cell-ops::before{content:"操作";display:block;margin-bottom:6px}
+  #instBody .ops{max-width:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  #instBody .ops button{width:100%}
+
+  /* 弹窗与表单 */
+  .mask{padding:14px 8px}
+  .modal{padding:16px 14px}
+  input,select,textarea{font-size:16px}   /* 防止 iOS 聚焦自动放大 */
+  .modal .foot{flex-wrap:wrap}
+  .modal .foot button{flex:1 1 auto}
+
+  /* SSH */
+  .ssh-layout{grid-template-columns:1fr;height:auto;gap:10px}
+  .ssh-side{max-height:230px}
+  #termArea{height:60vh;min-height:380px}
+  pre.log{max-height:220px}
+
+  .login-card{width:min(340px,94vw)}
+  #toasts{left:12px;right:12px}
+  .toast{width:auto;min-width:0}
+  .qcard h4{flex-wrap:wrap}
+}
+@media (max-width:860px){
+  /* 内联固定宽度的下拉/输入在手机上收缩 */
+  #dnsAcct,#dnsZone{width:auto!important;max-width:46vw;min-width:130px}
+  #cfZoneSel{width:auto!important;max-width:70vw}
+  #portInput{width:90px!important}
+  .toolbar select,.toolbar input{max-width:60vw}
+  .modal h3{font-size:15px;line-height:1.4}
+  .ops button{padding:6px 6px;font-size:12px}
+  header .brand{font-size:14px}
+}
+@media (max-width:400px){
+  .toolbar .stat{font-size:11px;padding:4px 8px}
+  #instBody .ops{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #dnsAcct,#dnsZone{max-width:none;width:100%!important;display:block;margin-bottom:6px}
+}
+</style>
+</head>
+<body>
+
+<!-- 登录层 -->
+<div id="loginMask" class="show">
+  <div class="login-card">
+    <div class="logo">☁️</div>
+    <h2>OCI Manage Lite</h2>
+    <p>Oracle Cloud 轻量管理面板</p>
+    <input id="loginPw" type="password" placeholder="面板密码" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="err-text" id="loginErr"></div>
+    <button style="width:100%" onclick="doLogin()">登 录</button>
+  </div>
+</div>
+
+<header>
+  <div class="brand">☁️ OCI <span>Manage Lite</span></div>
+  <nav>
+    <button id="nav-inst" class="active" onclick="showTab('inst')">实例管理</button>
+    <button id="nav-quota" onclick="showTab('quota')">配额订阅</button>
+    <button id="nav-dns" onclick="showTab('dns')">域名 DNS</button>
+    <button id="nav-cf" onclick="showTab('cf')">CF Workers</button>
+    <button id="nav-guard" onclick="showTab('guard')">守护中心</button>
+    <button id="nav-ssh" onclick="showTab('ssh')">主机终端</button>
+    <button id="nav-acct" onclick="showTab('acct')">账户设置</button>
+  </nav>
+  <div class="right">
+    <button class="btn-ghost" onclick="loadAll(true)">⟳ 刷新</button>
+    <button class="btn-ghost" onclick="logout()">退出</button>
+  </div>
+</header>
+
+<main>
+  <!-- ============ 实例 ============ -->
+  <section id="tab-inst">
+    <div class="toolbar">
+      <div class="stat">实例 <b id="st-total">-</b></div>
+      <div class="stat">运行中 <b id="st-run" style="color:var(--green)">-</b></div>
+      <div class="stat">总 OCPU <b id="st-ocpu">-</b></div>
+      <div class="stat">总内存 <b id="st-mem">-</b></div>
+      <div class="spacer"></div>
+      <button onclick="openCreate()">＋ 创建实例</button>
+    </div>
+    <div class="tblwrap">
+      <table id="instTable">
+        <thead id="instHead"><tr>
+          <th>实例名称</th><th>状态</th><th>公网 IP</th><th>私网 IP</th>
+          <th>配置</th><th>启动盘</th><th>区域 / AD</th><th>账户</th><th>操作</th>
+        </tr></thead>
+        <tbody id="instBody"><tr><td colspan="9" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div id="instErrors"></div>
+  </section>
+
+  <!-- ============ 配额订阅 ============ -->
+  <section id="tab-quota" hidden>
+    <div class="toolbar">
+      <div class="stat">说明 <span style="color:var(--text)">A1 核数 / E2.Micro 配额用量(免费层判定)</span></div>
+      <div class="spacer"></div>
+      <button class="btn-ghost" onclick="loadQuota()">⟳ 刷新配额</button>
+    </div>
+    <div id="quotaBody"><p class="empty">点击"刷新配额"查询</p></div>
+  </section>
+
+  <!-- ============ 域名 DNS ============ -->
+  <section id="tab-dns" hidden>
+    <div class="toolbar">
+      <div class="stat">DNS 管理</div>
+      <select id="dnsAcct" style="width:220px" onchange="loadZones()"></select>
+      <select id="dnsZone" style="width:260px" onchange="loadRecords()"></select>
+      <div class="spacer"></div>
+      <button onclick="openRecModal()">＋ 添加记录</button>
+
+      <button class="btn-ghost" onclick="loadRecords()">⟳ 刷新</button>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>类型</th><th>名称</th><th>内容</th><th>TTL</th><th>代理</th><th>操作</th></tr></thead>
+      <tbody id="recBody"><tr><td colspan="6" class="empty">选择账户与域名后加载</td></tr></tbody>
+    </table></div>
+    <p class="hint" id="dnsHint"></p>
+  </section>
+
+  <!-- ============ CF Workers ============ -->
+  <section id="tab-cf" hidden>
+    <div class="toolbar">
+      <div class="stat" id="cfSub">Workers.dev 子域:-</div>
+      <div class="spacer"></div>
+      <button onclick="openWkModal()">＋ 部署新 Worker</button>
+      <button class="btn-cyan" onclick="openGitModal()">从 Git 部署</button>
+      <button class="btn-ghost" onclick="loadWorkers()">⟳ 刷新</button>
+    </div>
+    <div class="tblwrap"><table style="min-width:720px">
+      <thead><tr><th>脚本名</th><th>所属账户</th><th>创建时间</th><th>修改时间</th><th>操作</th></tr></thead>
+      <tbody id="wkBody"><tr><td colspan="5" class="empty">选择 Cloudflare 账户后加载</td></tr></tbody>
+    </table></div>
+    <div class="qcard" style="margin-top:14px">
+      <h4>路由绑定(按域名查看,只读)</h4>
+      <select id="cfZoneSel" style="width:280px" onchange="loadRoutes()"></select>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <input id="rt-pattern" placeholder="路由模式 如 blog.example.com/*" style="flex:1;min-width:200px">
+        <select id="rt-script" style="width:auto"></select>
+        <button onclick="addRoute()">＋ 绑定路由</button>
+      </div>
+      <div id="routeBody" style="margin-top:10px"></div>
+    </div>
+    <p class="hint">Token 需要 Account.Read + Workers Scripts.Edit 权限;部署为 Service Worker 语法(非 ES Module)。</p>
+  </section>
+
+  <!-- ============ 守护中心 ============ -->
+  <section id="tab-guard" hidden>
+    <div class="toolbar">
+      <div class="stat">守护中心 <span style="color:var(--text)">停机保活 · 流量超限通知/关停 · 后台自动巡检</span></div>
+      <div class="spacer"></div>
+      <button class="btn-ghost" onclick="loadGuard()">⟳ 刷新</button>
+      <button onclick="runGuardOnce()">▶ 手动巡检一次</button>
+    </div>
+    <div class="qcard">
+      <h4>🤖 Telegram 机器人通知(推荐)</h4>
+      <div class="grid2">
+        <div><label>Bot Token(@BotFather 创建)</label><input id="tg-token" placeholder="1234567890:AAE…"></div>
+        <div><label>Chat ID(向机器人发消息后从 getUpdates 获取)</label><input id="tg-chat" placeholder="如 123456789"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button onclick="saveTg()">保存配置</button>
+        <button class="btn-cyan" onclick="testTg()">📤 发送测试消息</button>
+        <span class="hint" style="align-self:center">配置后:停机拉起、流量超限等事件会推送到你的 Telegram</span>
+      </div>
+    </div>
+    <div class="qcard">
+      <h4>🔗 备用通用 Webhook(未配置 Telegram 时使用)</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="wh-url" placeholder="支持 {msg} 占位符,兼容 Bark / Server酱 等(GET 请求)">
+        <button onclick="saveWebhook()">保存</button>
+      </div>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>账户</th><th style="text-align:center">启用守护</th><th style="text-align:center">停机保活</th><th>月流量阈值(GB,0=不限)</th><th>超限动作</th><th>操作</th></tr></thead>
+      <tbody id="guardRules"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div>
+    <div class="qcard" style="margin-top:14px"><h4>最近事件</h4><div id="guardEvents"><p class="empty">加载中…</p></div></div>
+  </section>
+
+  <!-- ============ SSH 终端 ============ -->
+  <section id="tab-ssh" hidden>
+    <div class="toolbar">
+      <div class="stat">SSH 终端 <span style="color:var(--text)">轻量版:填写连接信息即可连入</span></div>
+      <div class="spacer"></div>
+      <button class="btn-ghost" onclick="sshClear()">清屏</button>
+      <button class="btn-red" onclick="sshDisconnect()">断开</button>
+    </div>
+    <div class="ssh-layout">
+      <div class="ssh-side">
+        <label>主机地址 *</label>
+        <input id="ssh-host" placeholder="1.2.3.4 或 host.com">
+        <label>端口</label>
+        <input id="ssh-port" type="number" value="22">
+        <label>用户名 *</label>
+        <input id="ssh-user" placeholder="root / ubuntu / opc">
+        <label>认证方式</label>
+        <select id="ssh-auth" onchange="document.getElementById('ssh-label').textContent=this.value==='key'?'SSH 私钥(PEM)':'密码'">
+          <option value="password">密码</option>
+          <option value="key">SSH 私钥</option>
+        </select>
+        <label id="ssh-label">密码</label>
+        <textarea id="ssh-secret" style="min-height:70px" placeholder="密码或 PEM 私钥"></textarea>
+        <p class="hint">凭据只保存在浏览器内存,关闭页面即清除;主机指纹首次连接需确认。</p>
+        <button style="width:100%;margin-top:8px" onclick="sshConnect()">🚀 连接</button>
+        <div class="chips" id="ssh-quick" style="margin-top:8px"><span style="color:var(--muted);font-size:12px">加载云主机…</span></div>
+      </div>
+      <div id="sshRight">
+        <div style="height:100%;min-height:420px;background:#0a0f15;border:1px solid var(--line);border-radius:10px;padding:6px;position:relative">
+          <div class="term-status" id="ssh-status" style="position:absolute;top:10px;right:16px;z-index:5">未连接</div>
+          <div id="ssh-term" style="height:100%"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 账户 ============ -->
+  <section id="tab-acct" hidden>
+    <div class="qcard">
+      <h4>🔑 面板密码修改</h4>
+      <div class="grid2">
+        <div><label>当前密码</label><input id="pw-old" type="password" autocomplete="current-password"></div>
+        <div><label>新密码(至少 6 位)</label><input id="pw-new" type="password" autocomplete="new-password"></div>
+      </div>
+      <div style="margin-top:10px;text-align:right"><button onclick="changePw()">确认修改</button></div>
+    </div>
+    <div class="toolbar">
+      <div class="stat">账户数 <b id="acctCount">-</b></div>
+      <div class="spacer"></div>
+      <button onclick="openAcctModal()">＋ 添加账户</button>
+    </div>
+    <div class="tblwrap">
+      <table>
+        <thead><tr><th>名称</th><th>区域</th><th>租户 OCID</th><th>用户 OCID</th><th>指纹</th><th>私钥</th><th>操作</th></tr></thead>
+        <tbody id="acctBody"></tbody>
+      </table>
+    </div>
+    <p class="hint">同一账号如需管理多个区域,可为不同 region 各添加一条记录。私钥仅加密存储在本机 data 目录,不会回传明文。</p>
+  </section>
+</main>
+
+<!-- 账户表单 -->
+<div class="mask" id="acctModal">
+  <div class="modal">
+    <h3 id="acctTitle">添加账户</h3>
+    <div class="chips" style="margin-bottom:4px">
+      <span class="chip on" id="pc-oci" onclick="setProvider('oci')">Oracle Cloud</span>
+      <span class="chip" id="pc-aws" onclick="setProvider('aws')">AWS</span>
+      <span class="chip" id="pc-cloudflare" onclick="setProvider('cloudflare')">Cloudflare</span>
+      <span class="chip" id="pc-dnshe" onclick="setProvider('dnshe')">DNSHE</span>
+    </div>
+    <div style="margin:6px 0 2px"><label style="margin-top:0">备注名称 *(自定义,方便区分)</label>
+      <input id="f-name" placeholder="如 myserver1 / 我的CF主号"></div>
+    <div id="pv-oci">
+    <div class="sec" style="border-top:none;margin:0 0 6px;padding:0">
+      <h4>📋 快速导入(推荐)</h4>
+      <textarea id="am-config" style="min-height:92px" placeholder="[DEFAULT]
+user=ocid1.user.oc1..xxxxxxxx
+fingerprint=d2:40:77:af:ec:43:4b:fd:a8:5c:3c:f5:a2:cb:41:c4
+tenancy=ocid1.tenancy.oc1..xxxxxxxx
+region=ap-seoul-1
+key_file=&lt;path to your private keyfile&gt;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        <button onclick="parseOfficial()">解析并填充 ↓</button>
+        <label class="btn-ghost" style="cursor:pointer;padding:7px 14px;border:1px solid var(--line);border-radius:6px">
+          📎 上传私钥文件(.pem)
+          <input type="file" id="am-pemfile" accept=".pem,.key,.txt" style="display:none" onchange="loadPemFile(this)">
+        </label>
+        <span id="am-pemname" style="color:var(--green);font-size:12px"></span>
+      </div>
+      <p class="hint">直接粘贴控制台下载的配置文件内容即可;key_file 路径无效没关系,请用上方按钮上传下载好的 .pem 私钥。</p>
+    </div>
+    <div class="grid2">
+      <div><label>区域 *</label><input id="f-region" placeholder="ap-seoul-1"></div>
+      <div><label>租户 OCID *</label><input id="f-tenancy" placeholder="ocid1.tenancy.oc1..…"></div>
+      <div><label>用户 OCID *</label><input id="f-user" placeholder="ocid1.user.oc1..…"></div>
+      <div style="grid-column:1/-1"><label>API Key 指纹 *</label><input id="f-fp" placeholder="aa:bb:cc:…"></div>
+      <div style="grid-column:1/-1"><label id="f-key-label">API 私钥(PEM)*</label>
+        <textarea id="f-key" placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"></textarea></div>
+    </div>
+    </div>
+    <div id="pv-aws" hidden>
+      <div class="grid2">
+        <div><label>IAM Access Key ID *</label><input id="f-akid" placeholder="AKIA…"></div>
+        <div><label>Secret Access Key *</label><input id="f-aksecret" type="password" placeholder="仅保存在本面板,加密存储"></div>
+        <div><label>区域 *</label><input id="f-awsregion" list="awsregions" placeholder="us-east-1 / ap-east-1 / ap-northeast-2">
+          <datalist id="awsregions">
+          <option value="us-east-1">美国弗吉尼亚</option>
+          <option value="us-east-2">美国俄亥俄</option>
+          <option value="us-west-1">美国加州</option>
+          <option value="us-west-2">美国俄勒冈</option>
+          <option value="ap-east-1">香港(仅EC2)</option>
+          <option value="ap-northeast-1">日本东京</option>
+          <option value="ap-northeast-2">韩国首尔</option>
+          <option value="ap-northeast-3">日本大阪</option>
+          <option value="ap-south-1">印度孟买</option>
+          <option value="ap-southeast-1">新加坡</option>
+          <option value="ap-southeast-2">澳大利亚悉尼</option>
+          <option value="ca-central-1">加拿大</option>
+          <option value="eu-central-1">德国法兰克福</option>
+          <option value="eu-west-1">爱尔兰</option>
+          <option value="eu-west-2">英国伦敦</option>
+          <option value="eu-west-3">法国巴黎</option>
+          <option value="eu-north-1">瑞典斯德哥尔摩</option>
+          <option value="sa-east-1">巴西圣保罗</option>
+        </datalist></div>
+        <div><label>IAM 权限提示</label><p class="hint" style="margin-top:8px">EC2 需 ec2:Describe*/电源操作权限;<b>Lightsail 轻量服务器自动扫描全部区域</b>,无需选对区域</p></div>
+      </div>
+    </div>
+    <div id="pv-cloudflare" hidden>
+      <div class="grid2">
+        <div><label>API Token *(唯一必填项)</label><input id="f-cftoken" type="password" placeholder="粘贴 API Token"></div>
+        <div><label>如何获取</label><p class="hint" style="margin-top:8px">CF 控制台 → My Profile → API Tokens → Create Token → 选「编辑区域 DNS」模板并追加 Workers 权限。无需账号邮箱或 Account ID,Token 会自动识别可见的账户与域名。</p></div>
+      </div>
+    </div>
+    <div id="pv-dnshe" hidden>
+      <div class="grid2">
+        <div><label>API Key *</label><input id="f-dnshekey" placeholder="cfsd_xxxxxxxxxx"></div>
+        <div><label>API Secret *</label><input id="f-dnshesecret" type="password" placeholder="创建 API Key 时只显示一次"></div>
+        <div style="grid-column:1/-1"><p class="hint">在 <b>my.dnshe.com</b> 客户区 → 免费域名管理 → 左侧「API 管理」→ 创建 API Key,把 <b>API Key</b> 和 <b>API Secret</b> 填到这里。官方 API V2.0,支持子域名与 DNS 记录全量增删改查。</p></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('acctModal')">取消</button>
+      <button onclick="saveAcct()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 创建实例 -->
+<div class="mask" id="createModal">
+  <div class="modal wide">
+    <h3>创建实例</h3>
+    <p class="sub" id="createSub">选择平台后按需填写</p>
+    <div class="chips">
+      <span class="chip on" id="cp-oci" onclick="setCreatePlatform('oci')">Oracle Cloud</span>
+      <span class="chip" id="cp-aws" onclick="setCreatePlatform('aws')">AWS Lightsail</span>
+      <span class="chip on" id="chip-amd" style="margin-left:6px" onclick="setPreset('amd')">AMD 微型 1C/1G(永远免费)</span>
+      <span class="chip" id="chip-arm" onclick="setPreset('arm')">ARM A1.Flex 2C/12G(可强开)</span>
+    </div>
+    <div class="grid2">
+      <div><label>账户 *</label><select id="c-acct" onchange="onCreateAcct()"></select></div>
+      <div><label>区间 Compartment *</label><select id="c-comp" onchange="onCreateComp()"></select></div>
+      <div><label>可用域 AD *</label><select id="c-ad"></select></div>
+      <div><label>子网(公网子网)*</label><select id="c-subnet"></select></div>
+      <div><label>实例名称 *</label><input id="c-name" value="my-instance"></div>
+      <div><label>启动盘(GB)</label><input id="c-boot" type="number" value="50" min="47" max="2048"></div>
+      <div><label>操作系统</label><select id="c-os" onchange="loadImages()">
+        <option value="Canonical Ubuntu">Canonical Ubuntu</option>
+        <option value="Oracle Linux">Oracle Linux</option></select></div>
+      <div><label>系统镜像 *</label><select id="c-image"><option value="">请先选择账户与区间</option></select></div>
+      <div id="c-ocpus-box" style="display:none"><label>OCPU 数</label><input id="c-ocpus" type="number" value="2" min="1" max="64" step="1"></div>
+      <div id="c-mem-box" style="display:none"><label>内存(GB)</label><input id="c-mem" type="number" value="12" min="1" max="1024" step="1"></div>
+      <div id="c-retry-box" style="display:none"><label>强开:容量不足重试次数</label><input id="c-retry" type="number" value="30" min="1" max="100"></div>
+      <div id="c-delay-box" style="display:none"><label>强开:重试间隔(秒)</label><input id="c-delay" type="number" value="60" min="10" max="300"></div>
+      <div style="grid-column:1/-1"><label>SSH 公钥 *</label>
+        <textarea id="c-ssh" style="min-height:70px" placeholder="ssh-ed25519 AAAA… user@host"></textarea></div>
+    </div>
+    <div id="awsCreateFields" hidden style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">
+      <div class="grid2">
+        <div><label>区域 *</label><select id="c-awsregion" onchange="onAwsRegion()"></select></div>
+        <div><label>可用区(留空自动分配)</label><input id="c-awsaz" placeholder="如 ap-northeast-1a(可留空)"></div>
+        <div><label>系统镜像 Blueprint *</label><select id="c-blueprint"></select></div>
+        <div><label>套餐 Bundle *</label><select id="c-bundle"></select></div>
+      </div>
+      <p class="hint" id="awsCreateHint">加载中…</p>
+    </div>
+    <p class="hint" id="c-hint">提示:免费层 ARM A1 为 4 核 / 24G 内存总额度;创建过程约 1~3 分钟,可在任务窗口实时查看。</p>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('createModal')">取消</button>
+      <button onclick="submitCreate()">🚀 创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 网络管理 -->
+<div class="mask" id="netModal">
+  <div class="modal wide">
+    <h3>网络管理 <span id="netTitle" style="color:var(--muted);font-size:13px"></span></h3>
+    <div id="netBody"><p class="empty">加载中…</p></div>
+    <div class="foot"><button class="btn-ghost" onclick="hide('netModal')">关闭</button></div>
+  </div>
+</div>
+
+<!-- 磁盘管理 -->
+<div class="mask" id="volModal">
+  <div class="modal">
+    <h3>启动盘管理 <span id="volTitle" style="color:var(--muted);font-size:13px"></span></h3>
+    <div id="volBody"><p class="empty">加载中…</p></div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('volModal')">关闭</button>
+      <button onclick="saveVol()">应用修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- 升降配 -->
+<div class="mask" id="resizeModal">
+  <div class="modal">
+    <h3>调整规格(升降配)</h3>
+    <p class="sub">弹性形状(如 A1.Flex)需先关机才能修改;免费层 A1 总额度 4 核 24G</p>
+    <div class="grid2">
+      <div><label>OCPU 数</label><input id="r-ocpus" type="number" min="1" max="64" step="1"></div>
+      <div><label>内存(GB)</label><input id="r-mem" type="number" min="1" max="1024" step="1"></div>
+    </div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('resizeModal')">取消</button>
+      <button onclick="submitResize()">应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 改名 -->
+<div class="mask" id="renameModal">
+  <div class="modal">
+    <h3>修改实例名称</h3>
+    <input id="rn-name" placeholder="新名称" style="margin-top:8px">
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('renameModal')">取消</button>
+      <button onclick="submitRename()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 终止 -->
+<div class="mask" id="termModal">
+  <div class="modal">
+    <h3 style="color:var(--red)">⚠ 终止实例</h3>
+    <p class="sub" id="termText"></p>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
+      <input type="checkbox" id="termKeep" style="width:auto"> 保留启动盘(数据保留,可日后重建)
+    </label>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('termModal')">取消</button>
+      <button class="btn-red" onclick="submitTerminate()">确认终止</button>
+    </div>
+  </div>
+</div>
+
+<!-- 任务日志 -->
+<div class="mask" id="jobModal">
+  <div class="modal">
+    <h3 id="jobTitle">任务执行中…</h3>
+    <pre class="log" id="jobLog"></pre>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('jobModal');stopPoll()">关闭</button>
+      <button id="jobCloseBtn" style="display:none" onclick="hide('jobModal');stopPoll();loadInstances()">完成,刷新列表</button>
+    </div>
+  </div>
+</div>
+
+<!-- 流量 -->
+<div class="mask" id="trafModal">
+  <div class="modal wide">
+    <h3>流量统计 <span id="trafTitle" style="color:var(--muted);font-size:13px"></span></h3>
+    <div class="chips">
+      <span class="chip on" id="tw-24" onclick="setTrafHours(24)">24 小时</span>
+      <span class="chip" id="tw-168" onclick="setTrafHours(168)">7 天</span>
+      <span class="chip" id="tw-720" onclick="setTrafHours(720)">30 天</span>
+    </div>
+    <p class="sub" id="trafSub"></p>
+    <canvas id="trafCanvas" width="800" height="260"></canvas>
+    <div class="traf-sum">
+      <span><span class="dot" style="background:var(--cyan)"></span>出站 <b id="trafUp">-</b></span>
+      <span><span class="dot" style="background:var(--green)"></span>入站 <b id="trafDown">-</b></span>
+    </div>
+    <p class="hint" id="trafHint">数据来自 oci_computeagent 监控插件。</p>
+    <div class="foot"><button class="btn-ghost" onclick="hide('trafModal')">关闭</button></div>
+  </div>
+</div>
+
+<!-- DNS 记录 -->
+<div class="mask" id="recModal">
+  <div class="modal">
+    <h3 id="recTitle">添加记录</h3>
+    <input type="hidden" id="rec-id">
+    <div class="grid2">
+      <div><label>类型 *</label><select id="rec-type" onchange="$('#recProxBox').style.display=this.value==='CNAME'||this.value==='A'?'':'none'">
+        <option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option>
+        <option>MX</option><option>NS</option><option>CAA</option><option>SRV</option></select></div>
+      <div><label>名称 *(@ 表示根域)</label><input id="rec-name" placeholder="@ 或 www"></div>
+      <div style="grid-column:1/-1"><label>内容 *</label>
+        <textarea id="rec-content" style="min-height:70px" placeholder="1.2.3.4 / target.example.com / v=spf1 …"></textarea></div>
+      <div><label>TTL(秒)</label><input id="rec-ttl" type="number" value="300" min="60"></div>
+      <div><label>MX 优先级(仅 MX)</label><input id="rec-pri" type="number" value="10"></div>
+      <div style="grid-column:1/-1;display:none" id="recProxBox">
+        <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
+          <input type="checkbox" id="rec-proxied" style="width:auto"> 开启 CDN 代理(橙色云朵)</label></div>
+    </div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('recModal')">取消</button>
+      <button onclick="saveRecord()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Worker 部署 -->
+<!-- Git 部署 Worker -->
+<div class="mask" id="gitModal">
+  <div class="modal wide">
+    <h3>从 Git 仓库部署 Worker</h3>
+    <p class="sub">下载 GitHub 仓库代码 → 自动识别 Worker 入口 → 上传到 Cloudflare(公开仓库无需 Token)</p>
+    <div class="grid2">
+      <div><label>Worker 名称 *</label><input id="git-name" placeholder="my-worker"></div>
+      <div><label>GitHub 仓库 *</label><input id="git-repo" placeholder="owner/repo 或 https://github.com/owner/repo"></div>
+      <div><label>分支</label><input id="git-branch" value="main" placeholder="main"></div>
+      <div><label>GitHub Token(私有仓库)</label><input id="git-token" type="password" placeholder="可选,有仓库读取权限的 PAT"></div>
+    </div>
+    <p class="hint">自动支持入口:<code>index.js</code> / <code>src/index.js</code> / <code>worker.js</code>,或读取 <code>wrangler.toml</code> 的 main 字段。</p>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('gitModal')">取消</button>
+      <button onclick="gitDeploy()">🚀 部署</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="wkModal">
+  <div class="modal wide">
+    <h3>部署 Worker</h3>
+    <div class="grid2">
+      <div><label>脚本名称 *</label><input id="wk-name" placeholder="my-worker"></div>
+      <div><label>提示</label><p class="hint" style="margin-top:8px">Service Worker 语法:addEventListener('fetch', …)</p></div>
+    </div>
+    <label>代码(JS)*</label>
+    <textarea id="wk-code" style="min-height:200px;font-size:12px" placeholder="addEventListener('fetch', event => {
+  event.respondWith(new Response('Hello from OCI Panel!'))
+})"></textarea>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('wkModal')">取消</button>
+      <button onclick="deployWorker()">🚀 部署</button>
+    </div>
+  </div>
+</div>
+
+<!-- HE DDNS -->
+<div class="mask" id="ddnsModal">
+  <div class="modal">
+    <h3>HE Dynamic DNS 更新</h3>
+    <p class="sub">用记录的 DDNS Key 更新 A/AAAA/TXT 值(不受 2FA 影响)</p>
+    <div class="grid2">
+      <div><label>完整主机名 *</label><input id="ddns-host" placeholder="home.example.com"></div>
+      <div><label>DDNS Key / API Secret *</label><input id="ddns-secret" placeholder="从记录 ✎ 图标处复制"></div>
+      <div style="grid-column:1/-1"><label>目标 IP(留空自动用服务器当前公网 IP)</label>
+        <input id="ddns-ip" placeholder="如 1.2.3.4"></div>
+    </div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('ddnsModal')">取消</button>
+      <button onclick="runDdns()">更新</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ================= 基础 ================= */
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: "same-origin", headers: { "Content-Type": "application/json" }, ...opts });
+  if (r.status === 401) { showLogin(); throw new Error("请先登录"); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
+  return d;
+}
+function toast(msg, type = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + type; el.textContent = msg;
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+function show(id) { $("#loginMask").classList.remove("show"); $("#" + id).classList.add("show"); }
+function hide(id) { $("#" + id).classList.remove("show"); }
+function showLogin() { $("#loginMask").classList.add("show"); }
+function copyText(t) {
+  (navigator.clipboard?.writeText(t) ?? Promise.reject()).then(() => toast("已复制:" + t, "ok"), () => toast("复制失败", "err"));
+}
+
+/* ================= 登录 ================= */
+async function doLogin() {
+  $("#loginErr").textContent = "";
+  try {
+    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#loginPw").value }) });
+    $("#loginMask").classList.remove("show"); $("#loginPw").value = "";
+    loadAll(true);
+  } catch (e) { $("#loginErr").textContent = e.message; }
+}
+async function logout() { try { await api("/api/logout", { method: "POST" }); } catch {} showLogin(); }
+
+const TABS = ["inst", "quota", "dns", "cf", "guard", "ssh", "acct"];
+function showTab(t) {
+  TABS.forEach(x => { const el = $("#tab-" + x); if (el) el.hidden = x !== t;
+    const b = $("#nav-" + x); b && b.classList.toggle("active", x === t); });
+  if (t === "quota" && $("#quotaBody").querySelector(".empty")) loadQuota();
+  if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); }
+  if (t === "ssh") { sshInit(); setTimeout(() => { try{ sshFit && sshFit.fit(); }catch{} }, 60); }
+  if (t === "dns") initDnsTab();
+  if (t === "cf") initCfTab();
+}
+
+/* ================= 实例列表 ================= */
+let instItems = [], acctItems = [];
+const badge = s => {
+  const map = { RUNNING: "b-run", STOPPED: "b-stop", STARTING: "b-busy", STOPPING: "b-busy", MOVING: "b-busy" };
+  return `<span class="badge ${map[s] || "b-err"}">${esc(s)}</span>`;
+};
+const lifeBadge = l => l === "RESERVED"
+  ? ' <span class="badge b-purple" title="保留IP">保留</span>'
+  : (l === "EPHEMERAL" ? ' <span class="badge b-info" title="临时IP">临时</span>' : "");
+
+async function loadInstances() {
+  $("#instBody").innerHTML = `<tr><td colspan="9" class="empty">加载中…</td></tr>`;
+  try {
+    const d = await api("/api/instances");
+    instItems = d.items || [];
+    renderInstances();
+    $("#instErrors").innerHTML = (d.errors || []).map(e => `<p class="hint" style="color:var(--amber)">⚠ ${esc(e)}</p>`).join("");
+  } catch (e) {
+    if (e.message !== "请先登录") $("#instBody").innerHTML = `<tr><td colspan="9" class="empty">加载失败:${esc(e.message)}</td></tr>`;
+  }
+}
+function renderInstances() {
+  const tb = $("#instBody");
+  if (!instItems.length) {
+    tb.innerHTML = `<tr><td colspan="9" class="empty">暂无实例,点击右上角"创建实例"或先添加账户</td></tr>`;
+  } else {
+    tb.innerHTML = instItems.map((i, idx) => {
+      const running = i.state === "RUNNING";
+      const spec = i.ocpus ? `${i.ocpus} OCPU / ${i.mem_gbs} GB` : esc((i.shape || "").replace("VM.Standard.", ""));
+      return `<tr>
+        <td class="wrap" data-l="实例"><b>${esc(i.name)}</b><br><span style="color:var(--muted);font-size:12px">${esc(i.compartment_name)}</span></td>
+        <td data-l="状态">${badge(i.state)}</td>
+        <td data-l="公网IP">${i.public_ip ? `<span class="ip" onclick="copyText('${i.public_ip}')">${i.public_ip}</span>${lifeBadge(i.public_lifetime)}` : '<span style="color:var(--muted)">-</span>'}</td>
+        <td data-l="私网IP">${i.private_ip ? `<span class="ip" onclick="copyText('${i.private_ip}')">${i.private_ip}</span>` : "-"}</td>
+        <td class="wrap" data-l="配置">${spec}<br><span style="color:var(--muted);font-size:11px">${esc(i.shape || "")}</span></td>
+        <td data-l="启动盘">${i.boot_gbs ? i.boot_gbs + " GB" : "-"}</td>
+        <td data-l="区域/AD">${esc(i.region)}<br><span style="color:var(--muted);font-size:12px">${esc(i.ad)}</span></td>
+        <td data-l="账户">${esc(i.account_name)}${i.provider === "aws" ? ' <span class="badge b-busy">AWS</span>' : ""}</td>
+        <td class="cell-ops"><div class="ops">
+          <button ${running ? "disabled" : ""} onclick="doOp(${idx},'START')">启动</button>
+          <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'${i.provider === "aws" ? "STOP" : "SOFTSTOP"}')">关机</button>
+          <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'RESET')">重启</button>
+          ${i.provider === "aws"
+            ? `<button class="btn-cyan" onclick="awsChangeIp(${idx})">换IP</button>`
+            : `<button class="btn-cyan" onclick="openNet(${idx})">网络</button>
+               <button class="btn-ghost" onclick="openVol(${idx})">磁盘</button>
+               <button class="btn-purple" onclick="openResize(${idx})">规格</button>
+               <button class="btn-ghost" onclick="openRename(${idx})">改名</button>
+               <button class="btn-ghost" onclick="showTraffic(${idx})">流量</button>`}
+          <button class="btn-red" onclick="openTerminate(${idx})">终止</button>
+        </div></td></tr>`;
+    }).join("");
+  }
+  $("#st-total").textContent = instItems.length;
+  $("#st-run").textContent = instItems.filter(i => i.state === "RUNNING").length;
+  $("#st-ocpu").textContent = instItems.reduce((s, i) => s + (+i.ocpus || 0), 0);
+  $("#st-mem").textContent = instItems.reduce((s, i) => s + (+i.mem_gbs || 0), 0) + " GB";
+}
+const OP_TEXT = { START: "启动", SOFTSTOP: "软关机", STOP: "强制关机", RESET: "重启", SOFTRESET: "软重启" };
+async function doOp(idx, op) {
+  const i = instItems[idx];
+  if (!confirm(`确认对实例「${i.name}」执行【${OP_TEXT[op]}】?`)) return;
+  try {
+    if (i.provider === "aws") {
+      await api("/api/aws/op", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, service: i.service || "ec2", region: i.region,
+        instance_id: i.id, op }) });
+    } else {
+      await api("/api/instances/op", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, compartment_id: i.compartment_id, instance_id: i.id, op }) });
+    }
+    toast(`已下发「${OP_TEXT[op]}」指令,状态稍后刷新`, "ok");
+    setTimeout(loadInstances, 4000);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 任务轮询 ================= */
+let pollTimer = null;
+function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
+function openJob(title, jobId, onDone) {
+  $("#jobTitle").textContent = title + " · 执行中…";
+  $("#jobLog").textContent = "";
+  $("#jobCloseBtn").style.display = "none";
+  show("jobModal");
+  poll(jobId, onDone);
+}
+async function poll(jobId, onDone) {
+  stopPoll();
+  try {
+    const j = await api("/api/jobs/" + jobId);
+    $("#jobLog").textContent = (j.log || []).join("\n");
+    $("#jobLog").scrollTop = $("#jobLog").scrollHeight;
+    if (j.status === "running") { pollTimer = setTimeout(poll, 2000, jobId, onDone); return; }
+    $("#jobTitle").textContent = $("#jobTitle").textContent.replace("执行中…", j.status === "done" ? "完成 ✅" : "失败 ❌");
+    if (j.status === "done" && j.result?.new_ip)
+      $("#jobLog").textContent += `\n\n>>> 新公网 IP:${j.result.new_ip}`;
+    if (j.status === "done" && j.result?.public_ip !== undefined)
+      $("#jobLog").textContent += `\n\n>>> 公网 IP:${j.result.public_ip || "(未获取到)"}`;
+    if (j.status === "error") $("#jobLog").textContent += "\n" + (j.error || "");
+    $("#jobCloseBtn").style.display = "";
+    $("#jobCloseBtn").textContent = "完成,刷新列表";
+    if (onDone) onDone(j);
+  } catch (e) { $("#jobLog").textContent += "\n" + e.message; }
+}
+
+/* ================= 创建实例 ================= */
+let createPlatform = "oci";
+
+function setCreatePlatform(p) {
+  createPlatform = p;
+  $("#cp-oci").classList.toggle("on", p === "oci");
+  $("#cp-aws").classList.toggle("on", p === "aws");
+  const aws = p === "aws";
+  $("#createSub").textContent = aws ? "AWS Lightsail 创建:选择区域、镜像与套餐" : "预设一键预填规格;ARM A1 支持容量不足自动重试(强开模式)";
+  // 切换字段可见性:OCI 字段组 / AWS 字段组
+  const ociFields = ["c-comp", "c-ad", "c-subnet", "c-boot", "c-os", "c-image", "c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box"];
+  ociFields.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = aws ? "none" : ""; });
+  document.getElementById("awsCreateFields").hidden = !aws;
+  // OCI 的 SSH 公钥仍显示(两边都需要)
+  if (aws) {
+    const f = document.getElementById("f-sshLabel");
+    // 隐藏 OCI 预设 chips
+    document.getElementById("chip-amd").style.display = "none";
+    document.getElementById("chip-arm").style.display = "none";
+    loadAwsMeta();
+  } else {
+    document.getElementById("chip-amd").style.display = "";
+    document.getElementById("chip-arm").style.display = "";
+    setPreset(presetKind || "arm");
+  }
+}
+
+async function loadAwsMeta() {
+  const v = $("#c-acct").value || "";
+  const parts = v.split(":");
+  if (parts[0] !== "aws") return;
+  const aid = +parts[1];
+  const reg = $("#c-awsregion").value || "";
+  $("#awsCreateHint").textContent = "加载区域/镜像/套餐中…";
+  try {
+    const d = await api(`/api/aws/lightsail-meta?account_id=${aid}` + (reg ? `&region=${encodeURIComponent(reg)}` : ""));
+    if (!$("#c-awsregion").value || !reg) {
+      $("#c-awsregion").innerHTML = d.regions.map(r => `<option value="${r}">${esc(r)}</option>`).join("");
+      $("#c-awsregion").value = d.region || d.regions[0] || "";
+    }
+    $("#c-blueprint").innerHTML = d.blueprints.map(b =>
+      `<option value="${b.blueprint_id}">${esc(b.name)} (${esc(b.platform)} ${esc(b.os)})</option>`).join("")
+      || `<option value="">无可用镜像</option>`;
+    $("#c-bundle").innerHTML = d.bundles.map(b =>
+      `<option value="${b.bundle_id}">${esc(b.name)} · ${b.cpu}核/${b.ram}G/${b.disk}G · $${b.price}/月</option>`).join("")
+      || `<option value="">无可用套餐</option>`;
+    const sel = d.bundles.find(b => b.price === 0 || b.price <= 5);
+    if (sel) $("#c-bundle").value = sel.bundle_id;
+    $("#awsCreateHint").textContent = `区域 ${d.region}:${d.blueprints.length} 个镜像,${d.bundles.length} 个套餐`;
+  } catch (e) {
+    $("#awsCreateHint").textContent = "加载失败:" + e.message;
+    $("#c-blueprint").innerHTML = `<option value="">${esc(e.message)}</option>`;
+    $("#c-bundle").innerHTML = `<option value="">${esc(e.message)}</option>`;
+  }
+}
+async function onAwsRegion() {
+  const v = $("#c-acct").value || "";
+  if (v.split(":")[0] !== "aws") return;
+  loadAwsMeta();
+}
+
+let presetKind = null;
+function setPreset(k) {
+  presetKind = k;
+  $("#chip-amd").classList.toggle("on", k === "amd");
+  $("#chip-arm").classList.toggle("on", k === "arm");
+  const arm = k === "arm";
+  ["c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box"].forEach(id => $("#" + id).style.display = arm ? "" : "none");
+  loadImages();
+}
+async function openCreate() {
+  const ocis = acctItems.filter(a => (a.provider || "oci") === "oci");
+  const awss = acctItems.filter(a => a.provider === "aws");
+  if (!ocis.length && !awss.length) return toast("请先添加 Oracle Cloud 或 AWS 账户", "err");
+  $("#c-acct").innerHTML = "";
+  if (ocis.length) $("#c-acct").innerHTML += `<optgroup label="Oracle Cloud">${ocis.map(a => `<option value="oci:${a.id}">${esc(a.name)}(${esc(a.region)})</option>`).join("")}</optgroup>`;
+  if (awss.length) $("#c-acct").innerHTML += `<optgroup label="AWS">${awss.map(a => `<option value="aws:${a.id}">${esc(a.name)}(${esc(a.region || "自动")})</option>`).join("")}</optgroup>`;
+  setCreatePlatform("oci");
+  show("createModal");
+  await onCreateAcct();
+}
+function createBase() {
+  const i0 = instItems[0];
+  return { account_id: +$("#c-acct").value, compartment_id: $("#c-comp").value };
+}
+async function onCreateAcct() {
+  const v = $("#c-acct").value || "";
+  const parts = v.split(":");
+  if (parts[0] === "aws") {
+    setCreatePlatform("aws");
+    return;
+  }
+  setCreatePlatform("oci");
+  const aid = +parts[1];
+  $("#c-comp").innerHTML = `<option>加载中…</option>`;
+  $("#c-ad").innerHTML = `<option>加载中…</option>`;
+  $("#c-subnet").innerHTML = `<option value="">请先选择区间</option>`;
+  try {
+    const [c, a] = await Promise.all([
+      api("/api/meta/compartments?account_id=" + aid),
+      api("/api/meta/ads?account_id=" + aid)]);
+    $("#c-comp").innerHTML = c.items.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+    $("#c-ad").innerHTML = a.items.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("");
+    await onCreateComp();
+  } catch (e) { $("#c-comp").innerHTML = `<option value="">${esc(e.message)}</option>`; }
+}
+async function onCreateComp() {
+  const aid = +$("#c-acct").value, comp = $("#c-comp").value;
+  if (!comp) return;
+  $("#c-subnet").innerHTML = `<option>加载中…</option>`;
+  try {
+    const s = await api("/api/meta/subnets?account_id=" + aid + "&compartment_id=" + encodeURIComponent(comp));
+    $("#c-subnet").innerHTML = s.items.length
+      ? s.items.map(x => `<option value="${x.id}">${esc(x.name)}(${esc(x.cidr)})</option>`).join("")
+      : `<option value="">该区间无公网子网,请先在 OCI 建好 VCN</option>`;
+  } catch (e) { $("#c-subnet").innerHTML = `<option value="">${esc(e.message)}</option>`; }
+  loadImages();
+}
+async function loadImages() {
+  const aid = +$("#c-acct").value, comp = $("#c-comp").value;
+  const shape = presetKind === "amd" ? "VM.Standard.E2.1.Micro" : "VM.Standard.A1.Flex";
+  if (!comp) return;
+  $("#c-image").innerHTML = `<option>加载镜像中…</option>`;
+  try {
+    const d = await api("/api/meta/images?account_id=" + aid + "&compartment_id=" + encodeURIComponent(comp)
+      + "&os=" + encodeURIComponent($("#c-os").value) + "&shape=" + encodeURIComponent(shape));
+    $("#c-image").innerHTML = d.items.map(x => `<option value="${x.id}">${esc(x.label)}</option>`).join("")
+      || `<option value="">未找到镜像</option>`;
+  } catch (e) { $("#c-image").innerHTML = `<option value="">${esc(e.message)}</option>`; }
+}
+async function submitCreate() {
+  const v = $("#c-acct").value || "";
+  if (v.split(":")[0] === "aws") {
+    const aid = +v.split(":")[1];
+    const body = {
+      account_id: aid,
+      region: $("#c-awsregion").value,
+      az: $("#c-awsaz").value.trim(),
+      name: $("#c-name").value.trim(),
+      blueprint_id: $("#c-blueprint").value,
+      bundle_id: $("#c-bundle").value,
+    };
+    if (!body.name) return toast("请填写实例名称", "err");
+    if (!body.blueprint_id || !body.bundle_id) return toast("请选择镜像与套餐", "err");
+    hide("createModal");
+    try {
+      const d = await api("/api/aws/lightsail-create", { method: "POST", body: JSON.stringify(body) });
+      toast(`创建指令已下发:${body.name}(${body.region})`, "ok");
+      setTimeout(loadInstances, 8000);
+    } catch (e) { toast(e.message, "err"); }
+    return;
+  }
+  const arm = presetKind === "arm";
+  const body = {
+    account_id: +(v.split(":")[1] || $("#c-acct").value),
+    compartment_id: $("#c-comp").value,
+    name: $("#c-name").value.trim(),
+    ad: $("#c-ad").value,
+    subnet_id: $("#c-subnet").value,
+    image_id: $("#c-image").value,
+    shape_kind: presetKind,
+    ocpus: arm ? +$("#c-ocpus").value : null,
+    mem_gbs: arm ? +$("#c-mem").value : null,
+    boot_gbs: +$("#c-boot").value || 50,
+    ssh_key: $("#c-ssh").value,
+    retry_attempts: arm ? +$("#c-retry").value : 1,
+    retry_delay: arm ? +$("#c-delay").value : 45,
+  };
+  if (!body.name) return toast("请填写实例名称", "err");
+  if (!body.subnet_id) return toast("请选择公网子网", "err");
+  if (!body.image_id) return toast("请等待镜像加载并选择", "err");
+  if (!body.ad) return toast("请选择可用域", "err");
+  if (!$("#c-ssh").value.trim()) return toast("请填写 SSH 公钥", "err");
+  hide("createModal");
+  try {
+    const d = await api("/api/instances/create", { method: "POST", body: JSON.stringify(body) });
+    openJob("创建实例 · " + body.name, d.job_id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 网络管理 ================= */
+let curNet = null;   // 当前网络弹窗的实例行
+async function openNet(idx) {
+  curNet = instItems[idx];
+  $("#netTitle").textContent = "· " + curNet.name;
+  $("#netBody").innerHTML = `<p class="empty">加载中…</p>`;
+  show("netModal");
+  await renderNet();
+}
+async function renderNet() {
+  const i = curNet;
+  try {
+    const [info, rips] = await Promise.all([
+      api(`/api/net/info?account_id=${i.account_id}&compartment_id=${encodeURIComponent(i.compartment_id)}&instance_id=${encodeURIComponent(i.id)}`),
+      api(`/api/net/reserved-ips?account_id=${i.account_id}&compartment_id=${encodeURIComponent(i.compartment_id)}`),
+    ]);
+    const free = rips.items.filter(r => !r.assigned);
+    $("#netBody").innerHTML = `
+      <div class="sec" style="border-top:none;margin-top:0;padding-top:0">
+        <h4>IPv4</h4>
+        <div class="kv">
+          <span>公网 IP</span><div>${info.public_ip ? `<b class="ip" onclick="copyText('${info.public_ip}')">${info.public_ip}</b> ${lifeBadge(info.public_lifetime)}` : "-"}</div>
+          <span>私网 IP</span><div>${info.private_ip || "-"}</div>
+          <span>子网</span><div>${esc(info.subnet_name)}</div>
+        </div>
+        <div class="ops">
+          ${info.public_lifetime === "EPHEMERAL" ? `<button class="btn-cyan" onclick="doChangeIp()">更换临时 IP</button>` : ""}
+          ${info.public_lifetime === "RESERVED" ? `<button class="btn-ghost" onclick="doUnbind('${info.public_ip && rips.items.find(r=>r.ip_address===info.public_ip)?.id || ''}')">解绑保留 IP</button>` : ""}
+          ${free.length && info.vnic_id ? `<select id="bindSel" style="width:auto;min-width:180px">${free.map(r=>`<option value="${r.id}">${r.ip_address}</option>`).join("")}</select>
+          <button class="btn-green" onclick="doBind()">绑定所选保留 IP</button>` : ""}
+        </div>
+      </div>
+      <div class="sec">
+        <h4>IPv6</h4>
+        <div class="chips">${info.ipv6_addresses.length ? info.ipv6_addresses.map(a=>`<span class="chip ip" onclick="copyText('${a}')">${a}</span>`).join("") : `<span style="color:var(--muted);font-size:12px">暂无 IPv6 地址</span>`}</div>
+        <div class="ops"><button class="btn-cyan" ${info.subnet_ipv6_ready ? "" : "disabled"} onclick="doAddIpv6()">＋ 附加 IPv6</button></div>
+        ${info.subnet_ipv6_ready ? "" : `<p class="hint">子网未启用 IPv6,请先在 OCI 控制台为 VCN/子网开启 IPv6(GUA)。</p>`}
+      </div>
+      <div class="sec">
+        <h4>保留公网 IP 池(本区间)</h4>
+        <div class="tblwrap mini-tbl"><table style="min-width:0">
+          <thead><tr><th>IP</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>${rips.items.length ? rips.items.map(r=>`<tr>
+            <td class="ip" onclick="copyText('${r.ip_address}')">${r.ip_address}</td>
+            <td>${r.assigned ? '<span class="badge b-run">已绑定</span>' : '<span class="badge b-stop">空闲</span>'}</td>
+            <td><div class="ops">
+              ${!r.assigned ? `<button class="btn-ghost" onclick="doBindById('${r.id}')">绑定本机</button>` : ""}
+              <button class="btn-red" onclick="doDelRip('${r.id}','${r.ip_address}')">删除</button>
+            </div></td></tr>`).join("") : `<tr><td colspan="3" class="empty">无保留 IP</td></tr>`}</tbody>
+        </table></div>
+        <div class="ops" style="margin-top:8px"><button onclick="doCreateRip()">＋ 新建保留 IP</button></div>
+      </div>
+      <div class="sec">
+        <h4>安全组端口(TCP 入站 · 全网段)</h4>
+        <div class="ops">
+          <button class="btn-ghost" onclick="doPorts([22])">开放 22</button>
+          <button class="btn-ghost" onclick="doPorts([80])">开放 80</button>
+          <button class="btn-ghost" onclick="doPorts([443])">开放 443</button>
+          <input id="portInput" type="number" min="1" max="65535" placeholder="自定义端口" style="width:130px">
+          <button onclick="doPorts([+$('#portInput').value])">开放自定义</button>
+        </div>
+      </div>`;
+  } catch (e) { $("#netBody").innerHTML = `<p class="empty">加载失败:${esc(e.message)}</p>`; }
+}
+function netBody() { return { account_id: curNet.account_id, compartment_id: curNet.compartment_id, instance_id: curNet.id }; }
+async function doChangeIp() {
+  if (!confirm(`更换「${curNet.name}」的临时公网 IP?\n运行中会先软关机再开机,服务中断约 1~3 分钟。`)) return;
+  try {
+    const d = await api("/api/instances/change-ip", { method: "POST", body: JSON.stringify(netBody()) });
+    hide("netModal"); openJob("更换公网 IP · " + curNet.name, d.job_id);
+  } catch (e) { toast(e.message, "err"); }
+}
+async function doAddIpv6() {
+  try {
+    const d = await api("/api/net/add-ipv6", { method: "POST", body: JSON.stringify(netBody()) });
+    toast("IPv6 已附加:" + (d.ipv6 || ""), "ok"); renderNet();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function doCreateRip() {
+  try { await api("/api/net/reserved-ip", { method: "POST", body: JSON.stringify({ account_id: curNet.account_id, compartment_id: curNet.compartment_id, op: "create" }) });
+    toast("保留 IP 已创建", "ok"); renderNet(); } catch (e) { toast(e.message, "err"); }
+}
+async function doDelRip(id, ip) {
+  if (!confirm(`删除保留 IP ${ip}?`)) return;
+  try { await api("/api/net/reserved-ip", { method: "POST", body: JSON.stringify({ account_id: curNet.account_id, compartment_id: curNet.compartment_id, op: "delete", public_ip_id: id }) });
+    toast("已删除", "ok"); renderNet(); } catch (e) { toast(e.message, "err"); }
+}
+async function doBind() { const id = $("#bindSel")?.value; if (id) doBindById(id); }
+async function doBindById(id) {
+  try { await api("/api/net/reserved-ip", { method: "POST", body: JSON.stringify({ account_id: curNet.account_id, compartment_id: curNet.compartment_id, op: "bind", public_ip_id: id, vnic_id: curNet.vnic_id || "" }) });
+    toast("已绑定(如实例运行中,公网 IP 立即生效)", "ok"); renderNet(); } catch (e) { toast(e.message, "err"); }
+}
+async function doUnbind(id) {
+  if (!id) return toast("未找到对应的保留 IP 记录", "err");
+  try { await api("/api/net/reserved-ip", { method: "POST", body: JSON.stringify({ account_id: curNet.account_id, compartment_id: curNet.compartment_id, op: "unbind", public_ip_id: id, vnic_id: curNet.vnic_id || "" }) });
+    toast("已解绑", "ok"); renderNet(); } catch (e) { toast(e.message, "err"); }
+}
+async function doPorts(ports) {
+  if (!ports[0] || ports[0] < 1 || ports[0] > 65535) return toast("请输入有效端口", "err");
+  try {
+    const d = await api("/api/net/open-ports", { method: "POST", body: JSON.stringify({ ...netBody(), ports }) });
+    toast(`已开放:${(d.added || []).join(", ") || "无新增"}` + ((d.skipped||[]).length ? `(已存在:${d.skipped.join(", ")})` : ""), "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 磁盘 ================= */
+let curVol = null;
+async function openVol(idx) {
+  curVol = instItems[idx];
+  $("#volTitle").textContent = "· " + curVol.name;
+  $("#volBody").innerHTML = `<p class="empty">加载中…</p>`;
+  show("volModal");
+  try {
+    const v = await api(`/api/vol/boot?account_id=${curVol.account_id}&compartment_id=${encodeURIComponent(curVol.compartment_id)}&instance_id=${encodeURIComponent(curVol.id)}`);
+    curVol.boot = v;
+    const vpuName = { 10: "Balanced 平衡(默认)", 20: "Better 较高", 120: "Ultra 极高" }[v.vpus_per_gb] || v.vpus_per_gb;
+    $("#volBody").innerHTML = `
+      <div class="kv">
+        <span>当前容量</span><div><b>${v.size_in_gbs} GB</b></div>
+        <span>性能层级</span><div>${esc(String(vpuName))}(${v.vpus_per_gb} VPU/GB)</div>
+      </div>
+      <label>扩容到(GB,只能增大)</label>
+      <input id="v-size" type="number" min="${v.size_in_gbs}" max="4096" value="${v.size_in_gbs}">
+      <label>调整性能(VPU/GB)</label>
+      <select id="v-vpu">
+        <option value="">不修改</option>
+        <option value="10" ${v.vpus_per_gb === 10 ? "selected" : ""}>10 · Balanced 平衡(默认)</option>
+        <option value="20" ${v.vpus_per_gb === 20 ? "selected" : ""}>20 · Better 较高</option>
+        <option value="120" ${v.vpus_per_gb === 120 ? "selected" : ""}>120 · Ultra 极高</option>
+      </select>
+      <p class="hint">免费层 200GB 总额度建议:单盘 50~100GB。扩容后需在系统内扩展分区文件系统。</p>`;
+  } catch (e) { $("#volBody").innerHTML = `<p class="empty">加载失败:${esc(e.message)}</p>`; }
+}
+async function saveVol() {
+  const v = curVol.boot;
+  const size = +$("#v-size").value, vpu = $("#v-vpu").value ? +$("#v-vpu").value : null;
+  if (size && size < v.size_in_gbs) return toast("启动盘只能扩容不能缩小", "err");
+  if (size === v.size_in_gbs && !vpu) return toast("未做任何修改", "err");
+  try {
+    await api("/api/vol/boot-update", { method: "POST", body: JSON.stringify({
+      account_id: curVol.account_id, boot_volume_id: v.id,
+      size_in_gbs: size > v.size_in_gbs ? size : null, vpus_per_gb: vpu }) });
+    toast("已应用,块存储异步生效中", "ok"); hide("volModal");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 规格 / 改名 / 终止 ================= */
+let curIdx = null;
+function openResize(idx) {
+  curIdx = idx; const i = instItems[idx];
+  $("#r-ocpus").value = i.ocpus || 2; $("#r-mem").value = i.mem_gbs || 12;
+  show("resizeModal");
+}
+async function submitResize() {
+  const i = instItems[curIdx];
+  try {
+    await api("/api/instances/resize", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, instance_id: i.id,
+      ocpus: +$("#r-ocpus").value, mem_gbs: +$("#r-mem").value }) });
+    toast("规格修改已提交(若失败请先关机再试)", "ok"); hide("resizeModal");
+  } catch (e) { toast(e.message, "err"); }
+}
+function openRename(idx) {
+  curIdx = idx; $("#rn-name").value = instItems[idx].name; show("renameModal");
+}
+async function submitRename() {
+  const i = instItems[curIdx];
+  const name = $("#rn-name").value.trim();
+  if (!name) return toast("名称不能为空", "err");
+  try {
+    await api("/api/instances/rename", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, instance_id: i.id, display_name: name }) });
+    toast("已改名", "ok"); hide("renameModal"); loadInstances();
+  } catch (e) { toast(e.message, "err"); }
+}
+function openTerminate(idx) {
+  curIdx = idx; const i = instItems[idx];
+  $("#termText").textContent = `将永久终止实例「${i.name}」(${i.public_ip || "无IP"}),此操作不可恢复!`;
+  $("#termKeep").checked = false;
+  show("termModal");
+}
+async function submitTerminate() {
+  const i = instItems[curIdx];
+  try {
+    if (i.provider === "aws") {
+      await api("/api/aws/op", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, service: i.service || "ec2", region: i.region,
+        instance_id: i.id, op: "TERMINATE" }) });
+    } else {
+      await api("/api/instances/terminate", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, instance_id: i.id,
+        preserve_boot_volume: $("#termKeep").checked }) });
+    }
+    toast("终止指令已下发", "ok"); hide("termModal"); setTimeout(loadInstances, 5000);
+  } catch (e) { toast(e.message, "err"); }
+}
+async function awsChangeIp(idx) {
+  const i = instItems[idx];
+  if (!confirm(`更换「${i.name}」公网 IP?\n将停止→启动实例(Lightsail 绑定静态IP则不变),期间服务中断。`)) return;
+  try {
+    const d = await api("/api/aws/change-ip", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, service: i.service || "ec2",
+      region: i.region, instance_id: i.id }) });
+    openJob("更换公网 IP · " + i.name, d.job_id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 流量 ================= */
+let trafHours = 24;
+function setTrafHours(h) {
+  trafHours = h;
+  [24, 168, 720].forEach(x => $("#tw-" + x).classList.toggle("on", x === h));
+  if (curIdx !== null && instItems[curIdx]) showTraffic(curIdx);
+}
+async function showTraffic(idx) {
+  curIdx = idx;
+  const i = instItems[idx];
+  $("#trafTitle").textContent = `· ${i.name}(${i.compartment_name})`;
+  $("#trafUp").textContent = "加载中…"; $("#trafDown").textContent = "";
+  show("trafModal");
+  try {
+    const d = await api("/api/traffic", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, compartment_id: i.compartment_id, hours: trafHours }) });
+    $("#trafSub").textContent = `范围:近 ${d.hours} 小时 · 聚合粒度:${d.window}`;
+    $("#trafUp").textContent = fmtBytes(d.total_up_bytes);
+    $("#trafDown").textContent = fmtBytes(d.total_down_bytes);
+    drawChart(d.points || []);
+    const tip = $("#trafHint");
+    if (!(d.points || []).length && !$("#monBtn")) {
+      tip.innerHTML = `<button id="monBtn" class="btn-cyan" onclick="enableMonitoring()">🔧 检测到无监控数据:一键开启本实例的 Compute Instance Monitoring</button>
+        <span style="color:var(--muted)">开启后约 5~10 分钟开始上报</span>`;
+    } else if ((d.points || []).length && $("#monBtn")) { tip.innerHTML = ""; }
+  } catch (e) {
+    toast(e.message, "err");
+    $("#trafUp").textContent = "获取失败"; $("#trafDown").textContent = e.message.slice(0, 60);
+  }
+}
+function fmtBytes(b) {
+  if (!b) return "0";
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(2) + " " + u[i];
+}
+function drawChart(points) {
+  const cv = $("#trafCanvas"), ctx = cv.getContext("2d");
+  const dpr = devicePixelRatio || 1;
+  const W = cv.width = cv.clientWidth * dpr, H = cv.height = 260 * dpr;
+  ctx.clearRect(0, 0, W, H);
+  const padL = 56 * dpr, padB = 30 * dpr, padT = 14 * dpr;
+  const maxV = Math.max(1, ...points.map(p => Math.max(p.down, p.up)));
+  ctx.strokeStyle = "#1c2532"; ctx.fillStyle = "#8296ab";
+  ctx.font = `${11 * dpr}px system-ui`;
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (H - padT - padB) * g / 4;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - 8, y); ctx.stroke();
+    ctx.fillText(fmtBytes(maxV * (4 - g) / 4), 6, y - 3);
+  }
+  if (!points.length) {
+    ctx.fillStyle = "#8296ab"; ctx.textAlign = "center";
+    ctx.fillText("暂无监控数据", W / 2, H / 2); return;
+  }
+  const n = points.length, group = (W - padL - 10) / n;
+  const bw = Math.max(2, group * 0.34);
+  const step = Math.max(1, Math.round(n / 8));
+  points.forEach((p, k) => {
+    const x0 = padL + k * group + (group - bw * 2) / 2;
+    const hUp = (H - padT - padB) * (p.up / maxV);
+    const hDn = (H - padT - padB) * (p.down / maxV);
+    ctx.fillStyle = "#22d3ee"; ctx.fillRect(x0, H - padB - hUp, bw, hUp);
+    ctx.fillStyle = "#22c55e"; ctx.fillRect(x0 + bw, H - padB - hDn, bw, hDn);
+    if (k % step === 0) {
+      ctx.fillStyle = "#8296ab";
+      const t = new Date(p.t);
+      const lbl = trafHours > 168 ? `${t.getMonth() + 1}/${t.getDate()}` : `${String(t.getHours()).padStart(2, "0")}:00`;
+      ctx.fillText(lbl, x0, H - 8);
+    }
+  });
+}
+
+/* ================= 配额订阅 ================= */
+const PM_BADGE = { FREE_TIER: '<span class="badge b-run">免费层</span>', PAYG: '<span class="badge b-info">PAYG 按量</span>' };
+async function loadQuota() {
+  const box = $("#quotaBody");
+  const ocis = acctItems.filter(a => (a.provider || "oci") === "oci");
+  if (!ocis.length) { box.innerHTML = `<p class="empty">暂无 Oracle Cloud 账户(配额订阅目前仅支持 OCI)</p>`; return; }
+  box.innerHTML = ocis.map(a => `<div class="qcard" id="q-${a.id}"><h4>${esc(a.name)} <span class="badge b-info">${esc(a.region)}</span></h4><p class="hint">查询中…</p></div>`).join("");
+  await Promise.all(ocis.map(async a => {
+    const el = document.getElementById("q-" + a.id);
+    try {
+      const d = await api("/api/quota?account_id=" + a.id);
+      el.innerHTML = `<h4>${esc(a.name)} <span class="badge b-info">${esc(d.region)}</span> ${PM_BADGE[d.payment_model] || '<span class="badge b-stop">订阅未知</span>'}</h4>
+        ${d.limits.length ? `<div class="tblwrap mini-tbl"><table style="min-width:0">
+          <thead><tr><th>限额</th><th>可用域</th><th>已用</th><th>可用余量</th></tr></thead>
+          <tbody>${d.limits.map(l => l.items.map(it => `<tr>
+            <td>${esc(l.name)}<br><span style="color:var(--muted);font-size:11px">${esc(l.description || "")}</span></td>
+            <td>${esc(it.ad)}</td><td>${it.used ?? "-"}</td>
+            <td><b style="color:${(+it.available > 0 ? "var(--green)" : "var(--red)")}">${it.available ?? "-"}</b></td>
+          </tr>`).join("")).join("")}</tbody></table></div>`
+        : `<p class="hint">该区域未返回关键配额(可能为非商用区域)</p>`}`;
+    } catch (e) { el.innerHTML = `<h4>${esc(a.name)} <span class="badge b-info">${esc(a.region)}</span></h4><p class="hint" style="color:var(--amber)">查询失败:${esc(e.message)}</p>`; }
+  }));
+}
+
+/* ================= 账户 ================= */
+let editAcctId = null;
+async function loadAccounts() {
+  const d = await api("/api/accounts");
+  acctItems = d.items || [];
+  $("#acctCount").textContent = acctItems.length;
+  $("#acctBody").innerHTML = acctItems.length ? acctItems.map(a => `<tr>
+      <td><b>${esc(a.name)}</b></td><td>${esc(a.region)}</td>
+      <td><span class="ip" onclick="copyText('${esc(a.tenancy_ocid)}')" style="font-size:12px">${esc(a.tenancy_ocid.slice(0, 28))}…</span></td>
+      <td><span class="ip" onclick="copyText('${esc(a.user_ocid)}')" style="font-size:12px">${esc(a.user_ocid.slice(0, 28))}…</span></td>
+      <td style="font-family:monospace;font-size:12px">${esc(a.fingerprint)}</td>
+      <td>${a.has_key ? '<span class="badge b-run">已加密保存</span>' : "-"}</td>
+      <td><div class="ops">
+        <button class="btn-green" onclick="checkAcct(${a.id},'${esc(a.name)}')">测活</button>
+        <button class="btn-ghost" onclick='openAcctModal(${JSON.stringify(a).replace(/'/g, "&#39;")})'>编辑</button>
+        <button class="btn-red" onclick="delAcct(${a.id},'${esc(a.name)}')">删除</button>
+      </div></td></tr>`).join("")
+    : `<tr><td colspan="7" class="empty">还没有账户,点击右上角"添加账户"</td></tr>`;
+}
+function openAcctModal(a) {
+  editAcctId = a ? a.id : null;
+  $("#acctTitle").textContent = a ? "编辑账户:" + a.name : "添加账户";
+  $("#f-key-label").textContent = a ? "API 私钥(留空表示不修改)" : "API 私钥(PEM)*";
+  $("#f-name").value = a?.name || ""; $("#f-region").value = a?.region || "";
+  $("#f-tenancy").value = a?.tenancy_ocid || ""; $("#f-user").value = a?.user_ocid || "";
+  $("#f-fp").value = a?.fingerprint || ""; $("#f-key").value = "";
+  $("#f-akid").value = ""; $("#f-aksecret").value = "";
+  $("#f-cftoken").value = "";
+  $("#f-dnshekey").value = ""; $("#f-dnshesecret").value = "";
+  $("#am-pemname").textContent = "";
+  setProvider(a?.provider || "oci", true);
+  show("acctModal");
+}
+async function saveAcct() {
+  const body = {
+    provider: curProvider,
+    name: $("#f-name").value.trim(), region: $("#f-region").value.trim(),
+    tenancy_ocid: $("#f-tenancy").value.trim(), user_ocid: $("#f-user").value.trim(),
+    fingerprint: $("#f-fp").value.trim(), private_key: $("#f-key").value,
+    aws_access_key_id: $("#f-akid").value.trim(), aws_secret_key: $("#f-aksecret").value,
+    cf_token: $("#f-cftoken").value.trim(),
+    dnshe_api_key: $("#f-dnshekey").value.trim(), dnshe_api_secret: $("#f-dnshesecret").value,
+  };
+  if (!body.name) return toast("请填写备注名称", "err");
+  if (curProvider === "oci") {
+    if (!body.region || !body.tenancy_ocid || !body.user_ocid || !body.fingerprint) return toast("请填写完整带 * 字段", "err");
+    if (!editAcctId && !body.private_key.includes("PRIVATE KEY")) return toast("请上传 .pem 或粘贴私钥", "err");
+  } else if (curProvider === "aws") {
+    if (!body.aws_access_key_id || !body.aws_secret_key || !$("#f-awsregion").value.trim())
+      return toast("请填写 AWS 凭证与区域", "err");
+    body.region = $("#f-awsregion").value.trim();
+  } else if (curProvider === "cloudflare") {
+    if (!body.cf_token) return toast("请填写 API Token", "err");
+  } else if (curProvider === "dnshe") {
+    if (!body.dnshe_api_key || !body.dnshe_api_secret) return toast("请填写 DNSHE API Key 与 API Secret", "err");
+  }
+  try {
+    if (editAcctId) await api("/api/accounts/" + editAcctId, { method: "PUT", body: JSON.stringify(body) });
+    else await api("/api/accounts", { method: "POST", body: JSON.stringify(body) });
+    hide("acctModal"); toast("已保存", "ok"); loadAccounts();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function delAcct(id, name) {
+  if (!confirm(`确认删除账户「${name}」?\n仅删除面板记录,不影响云上资源。`)) return;
+  try { await api("/api/accounts/" + id, { method: "DELETE" }); toast("已删除", "ok"); loadAccounts(); }
+  catch (e) { toast(e.message, "err"); }
+}
+
+
+/* ================= 守护中心 ================= */
+async function loadWebhookVal() {
+  try { const d = await api("/api/guardian/webhook"); $("#wh-url").value = d.webhook_url || ""; } catch {}
+}
+async function saveWebhook() {
+  try { await api("/api/guardian/webhook", { method: "POST", body: JSON.stringify({ webhook_url: $("#wh-url").value }) }); toast("已保存", "ok"); }
+  catch (e) { toast(e.message, "err"); }
+}
+async function loadGuard() {
+  try {
+    const [r, d] = await Promise.all([api("/api/guardian/rules"), api("/api/accounts")]);
+    acctItems = d.items || [];
+    const map = {}; (r.items || []).forEach(x => map[x.account_id] = x);
+    $("#guardRules").innerHTML = acctItems.length ? acctItems.map(a => {
+      const g = map[a.id] || {};
+      return `<tr>
+        <td><b>${esc(a.name)}</b><br><span style="color:var(--muted);font-size:12px">${esc(a.region)}</span></td>
+        <td style="text-align:center"><input type="checkbox" id="g-en-${a.id}" ${g.enabled ? "checked" : ""} style="width:auto"></td>
+        <td style="text-align:center"><input type="checkbox" id="g-ka-${a.id}" ${g.keepalive ? "checked" : ""} style="width:auto"></td>
+        <td><input id="g-tl-${a.id}" type="number" min="0" step="1" value="${g.traffic_limit_gb || 0}" style="width:110px"></td>
+        <td><select id="g-ta-${a.id}" style="width:120px">
+          <option value="notify" ${g.traffic_action !== "stop" ? "selected" : ""}>仅通知</option>
+          <option value="stop" ${g.traffic_action === "stop" ? "selected" : ""}>自动关停</option></select></td>
+        <td><button onclick="saveGuard(${a.id})">保存</button></td></tr>`;
+    }).join("") : `<tr><td colspan="6" class="empty">请先添加账户</td></tr>`;
+  } catch (e) { toast(e.message, "err"); }
+}
+async function saveGuard(aid) {
+  try {
+    await api("/api/guardian/rule", { method: "POST", body: JSON.stringify({
+      account_id: aid, enabled: $("#g-en-" + aid).checked, keepalive: $("#g-ka-" + aid).checked,
+      traffic_limit_gb: +$("#g-tl-" + aid).value || 0, traffic_action: $("#g-ta-" + aid).value }) });
+    toast("规则已保存", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+async function loadGuardEvents() {
+  try {
+    const d = await api("/api/guardian/events?limit=60");
+    const kb = { keepalive: "b-run", traffic: "b-busy", error: "b-err" };
+    $("#guardEvents").innerHTML = d.items.length ? d.items.map(e => `<div class="ev-line">
+      <span class="badge ${kb[e.kind] || "b-info"}">${esc(e.kind)}</span>
+      <span style="color:var(--muted);font-size:12px">${esc(e.created_at)}${e.account_name ? " · " + esc(e.account_name) : ""}</span>
+      <span>${esc(e.message)}</span></div>`).join("") : `<p class="empty">暂无事件</p>`;
+  } catch (e) { toast(e.message, "err"); }
+}
+async function runGuardOnce() {
+  try { const d = await api("/api/guardian/run", { method: "POST" }); openJob("手动巡检", d.job_id); }
+  catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= SSH 终端(轻量版) ================= */
+let sshTerm = null, sshFit = null, sshWs = null, sshOpened = false;
+function sshInit() { renderSshQuick(); }
+async function renderSshQuick() {
+  const box = document.getElementById("ssh-quick");
+  if (!box) return;
+  try {
+    const d = await api("/api/instances");
+    const items = (d.items || []).filter(i => i.public_ip);
+    box.innerHTML = items.slice(0, 8).map(i =>
+      `<span class="chip" onclick="sshFill('${i.public_ip}','${esc(i.name)}')">${esc(i.name)}(${i.public_ip})</span>`).join("")
+      || '<span style="color:var(--muted);font-size:12px">暂无云主机 IP,可手动填写</span>';
+  } catch { box.innerHTML = '<span style="color:var(--muted);font-size:12px">无法拉取云主机</span>'; }
+}
+function sshFill(ip, name) {
+  document.getElementById("ssh-host").value = ip;
+  if (!document.getElementById("ssh-user").value)
+    document.getElementById("ssh-user").value = /ubuntu/i.test(name) ? "ubuntu" : "root";
+}
+function sshEnsureTerm() {
+  if (sshTerm) return true;
+  try {
+    if (typeof Terminal === "undefined") throw new Error("xterm.js 未加载");
+    sshTerm = new Terminal({ cursorBlink:true, fontSize:13, fontFamily:'ui-monospace,Consolas,monospace',
+      theme:{ background:"#0a0f15", foreground:"#dbe4ee", cursor:"#4f8cff" } });
+    sshFit = new FitAddon.FitAddon();
+    sshTerm.loadAddon(sshFit);
+    sshTerm.open(document.getElementById("ssh-term"));
+    sshTerm.onData(d => { if (sshWs && sshWs.readyState===1) sshWs.send(JSON.stringify({type:"input",data:d})); });
+    return true;
+  } catch(e) {
+    const box = document.getElementById("ssh-term");
+    if (box) box.innerHTML = '<div style="padding:20px;color:var(--red)">终端组件加载失败:'+esc(e.message)+'</div>';
+    return false;
+  }
+}
+function sshStatus(txt, cls) {
+  const el = document.getElementById("ssh-status");
+  if (el) { el.textContent = txt; el.className = "term-status " + (cls||""); }
+}
+function sshConnect() {
+  const host = document.getElementById("ssh-host").value.trim();
+  const port = +document.getElementById("ssh-port").value || 22;
+  const user = document.getElementById("ssh-user").value.trim();
+  const auth = document.getElementById("ssh-auth").value;
+  const secret = document.getElementById("ssh-secret").value;
+  if (!host || !user) return toast("请填写主机和用户名","err");
+  if (!secret.trim()) return toast("请输入密码或私钥","err");
+  if (!sshEnsureTerm()) return;
+  sshDisconnect();
+  sshStatus("连接中…");
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  sshWs = new WebSocket(`${proto}://${location.host}/ws/ssh`);
+  sshWs.onopen = () => sshWs.send(JSON.stringify({type:"open",host,port,username:user,auth,secret,
+    cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}));
+  sshWs.onmessage = ev => {
+    let m; try{m=JSON.parse(ev.data);}catch{return;}
+    if(m.type==="data") sshTerm.write(m.data);
+    else if(m.type==="opened"){ sshOpened=true; sshStatus("● 已连接","ok"); }
+    else if(m.type==="hostkey"){
+      if(confirm(`首次连接 ${host}\n\n主机指纹:\n${m.fingerprint}\n\n信任并继续?`))
+        sshWs.send(JSON.stringify({type:"trust",host,port,username:user,auth,secret,
+          cols:Math.floor(sshTerm.cols),rows:Math.floor(sshTerm.rows)}));
+      else { sshWs.send(JSON.stringify({type:"reject"})); sshStatus("已取消","err"); }
+    }
+    else if(m.type==="exit") sshStatus("● 会话已结束","");
+    else if(m.type==="error"){
+      sshStatus("✕ "+m.message,"err"); toast(m.message,"err");
+      try{ sshTerm.write("\r\n\x1b[31m[连接失败] "+m.message+"\x1b[0m\r\n"); }catch{}
+    }
+  };
+  sshWs.onclose = () => { if(!sshOpened) sshStatus("● 未连接",""); sshOpened=false; };
+}
+function sshDisconnect() {
+  if (sshWs) { try{sshWs.close();}catch{} sshWs=null; }
+  sshOpened=false;
+  sshStatus("已断开","");
+}
+function sshClear() { try{ sshTerm && sshTerm.clear(); }catch{} }
+window.addEventListener("resize", () => { try{ sshFit && sshFit.fit(); }catch{} });
+
+
+function openGitModal() {
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  if (!cfs.length) return toast("请先添加 Cloudflare 账户", "err");
+  $("#git-name").value = ""; $("#git-repo").value = "";
+  $("#git-branch").value = "main"; $("#git-token").value = "";
+  show("gitModal");
+}
+async function gitDeploy() {
+  const cfs = acctItems.filter(a => a.provider === "cloudflare");
+  if (!cfs.length) return toast("请先添加 Cloudflare 账户", "err");
+  const body = {
+    account_id: cfs[0].id,
+    repo_url: $("#git-repo").value.trim(),
+    branch: $("#git-branch").value.trim() || "main",
+    worker_name: $("#git-name").value.trim(),
+    token: $("#git-token").value.trim(),
+  };
+  if (!body.worker_name || !body.repo_url) return toast("请填写 Worker 名称和仓库地址", "err");
+  hide("gitModal");
+  toast("正在从 GitHub 拉取并部署…");
+  try {
+    await api("/api/cf/git-deploy", { method: "POST", body: JSON.stringify(body) });
+    toast("🎉 Git 部署成功", "ok"); loadWorkers();
+  } catch (e) { toast("部署失败:" + e.message, "err"); }
+}
+
+/* ================= 启动 ================= */
+async function loadAll(notify) {
+  try { await Promise.all([loadInstances(), loadAccounts()]); }
+  catch (e) { if (notify && e.message !== "请先登录") toast(e.message, "err"); }
+}
+(async () => {
+  try { await api("/api/status"); $("#loginMask").classList.remove("show"); loadAll(); }
+  catch { showLogin(); }
+})();
+</script>
+</body>
+</html>

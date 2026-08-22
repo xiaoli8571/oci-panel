@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+nohup.out
+docker-compose.override.yml

@@ -1,0 +1,745 @@
+"""OCI SDK 封装:实例 / 创建 / 网络(IPv4·IPv6·保留IP·安全组) / 卷 / 配额订阅。
+
+所有公开函数第一个参数为数据库中的账户行(dict);
+需要长时间等待的函数第一个参数为 progress 日志回调(jobs.start_job 注入)。
+"""
+from __future__ import annotations
+
+import datetime as dt
+import logging
+import time
+
+log = logging.getLogger("oci")
+
+ALLOWED_OPS = {"START", "SOFTSTOP", "STOP", "RESET", "SOFTRESET"}
+
+# 常用形状预设(对齐 R探长 的快速配置)
+PRESETS = {
+    "amd": {"shape": "VM.Standard.E2.1.Micro", "label": "AMD 微型 1C/1G"},
+    "arm": {"shape": "VM.Standard.A1.Flex", "label": "ARM A1 2C/12G"},
+}
+
+VPU_LABEL = {10: "Balanced(平衡)", 20: "Better(较高)", 120: "Ultra(极高)"}
+
+
+class OciError(RuntimeError):
+    """对用户友好的 OCI 调用异常。"""
+
+
+def _sdk():
+    try:
+        import oci  # 延迟导入,加快面板启动
+    except ImportError as e:
+        raise OciError("服务器未安装 oci-sdk,请执行 pip install oci") from e
+    return oci
+
+
+def build_config(acct: dict) -> dict:
+    from . import security
+    return {
+        "user": acct["user_ocid"],
+        "tenancy": acct["tenancy_ocid"],
+        "region": acct["region"],
+        "fingerprint": acct["fingerprint"],
+        "key_content": security.decrypt(acct["private_key_enc"]),
+    }
+
+
+def _client(oci, cls, cfg):
+    """统一创建 SDK 客户端:禁用自动重试并设置超时,保证面板响应迅速、失败可见。"""
+    return cls(cfg, retry_strategy=oci.retry.NoneRetryStrategy(), timeout=(10, 60))
+
+
+def _wrap(e: Exception) -> OciError:
+    if isinstance(e, OciError):
+        return e
+    status = getattr(e, "status", None)
+    code = getattr(e, "code", "")
+    msg = getattr(e, "message", None) or str(e)
+    if status or code:
+        hint = ""
+        if status == 401:
+            hint = "(请检查 API Key / fingerprint / tenancy / user OCID 是否正确)"
+        elif status == 404:
+            hint = "(资源不存在或无权限访问该区间)"
+        if "Out of host capacity" in msg:
+            hint += "(当前区域 ARM 容量不足)"
+        return OciError(f"OCI 接口错误 [{status} {code}] {msg} {hint}".strip())
+    return OciError(f"OCI 调用失败:{msg}")
+
+
+def _is_capacity_err(e: Exception) -> bool:
+    return "Out of host capacity" in str(getattr(e, "message", "") or e)
+
+
+# ================================================================ 基础元数据
+
+def _iter_compartments(identity, tenancy_id: str) -> list[tuple[str, str]]:
+    comps = [(tenancy_id, "root(租户根区间)")]
+    for c in identity.list_compartments(
+        tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE"
+    ).data:
+        if (c.lifecycle_state or "").upper() == "ACTIVE":
+            comps.append((c.id, c.name))
+    return comps
+
+
+def list_compartments(acct: dict) -> list[dict]:
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        identity = _client(oci, oci.identity.IdentityClient, cfg)
+        return [{"id": i, "name": n} for i, n in _iter_compartments(identity, cfg["tenancy"])]
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def list_ads(acct: dict) -> list[str]:
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        identity = _client(oci, oci.identity.IdentityClient, cfg)
+        return [ad.name for ad in identity.list_availability_domains(cfg["tenancy"]).data]
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def list_platform_images(acct: dict, compartment_id: str, shape: str, os_name: str) -> list[dict]:
+    """按形状与操作系统列出官方平台镜像(新→旧)。"""
+    try:
+        oci = _sdk()
+        compute = _client(oci, oci.core.ComputeClient, build_config(acct))
+        imgs = oci.pagination.list_call_get_all_results(
+            compute.list_images, compartment_id,
+            operating_system=os_name, shape=shape,
+            sort_by="TIMECREATED", sort_order="DESC",
+        ).data[:40]
+        return [{
+            "id": im.id,
+            "label": f"{im.operating_system} {im.operating_system_version} · {im.display_name}",
+        } for im in imgs]
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def list_public_subnets(acct: dict, compartment_id: str) -> list[dict]:
+    try:
+        oci = _sdk()
+        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        out = []
+        for s in net.list_subnets(compartment_id).data:
+            if (s.lifecycle_state or "").upper() != "AVAILABLE":
+                continue
+            if s.prohibit_public_ip_on_vnic:
+                continue
+            out.append({"id": s.id, "name": s.display_name or s.id[-12:], "cidr": s.cidr_block})
+        return out
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 创建实例(含强开 ARM)
+
+def _launch_once(oci, compute, d) -> object:
+    details = oci.core.models.LaunchInstanceDetails(
+        availability_domain=d["ad"],
+        compartment_id=d["compartment_id"],
+        display_name=d["name"],
+        shape=d["shape"],
+        shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
+            ocpus=d.get("ocpus"), memory_in_gbs=d.get("mem_gbs"),
+        ) if d.get("ocpus") else None,
+        source_details=oci.core.models.InstanceSourceViaImageDetails(
+            image_id=d["image_id"], boot_volume_size_in_gbs=d.get("boot_gbs"),
+        ),
+        create_vnic_details=oci.core.models.CreateVnicDetails(
+            subnet_id=d["subnet_id"], assign_public_ip=True, display_name=f"{d['name']}-vnic",
+        ),
+        metadata={"ssh_authorized_keys": d["ssh_key"]},
+        is_pv_encryption_in_transit_enabled=True,
+    )
+    return compute.launch_instance(details).data
+
+
+def create_instance(progress, acct: dict, d: dict) -> dict:
+    """创建实例;A1 形状支持容量不足自动重试(强开)。返回最终公网 IP。"""
+    st = None
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        compute = _client(oci, oci.core.ComputeClient, cfg)
+
+        attempts = max(int(d.get("retry_attempts") or 1), 1)
+        delay = min(int(d.get("retry_delay") or 45), 300)
+        ins = None
+        for i in range(1, attempts + 1):
+            try:
+                progress(f"[第{i}/{attempts}次] 提交创建请求({d['shape']}) …")
+                ins = _launch_once(oci, compute, d)
+                break
+            except Exception as e:  # noqa: BLE001
+                if _is_capacity_err(e) and i < attempts:
+                    progress(f"容量不足(Out of host capacity),{delay}s 后自动重试 …")
+                    time.sleep(delay)
+                    continue
+                raise
+
+        iid = ins.id
+        progress(f"实例已提交:{iid}")
+        progress("等待实例进入 RUNNING(最长 15 分钟)…")
+        deadline = time.time() + 900
+        while time.time() < deadline:
+            st = (compute.get_instance(iid).data.lifecycle_state or "").upper()
+            progress(f"状态:{st}")
+            if st in ("RUNNING", "FAILED", "TERMINATED"):
+                break
+            time.sleep(10)
+
+        net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+        ip = None
+        for att in compute.list_vnic_attachments(d["compartment_id"], instance_id=iid).data:
+            if att.lifecycle_state == "ATTACHED":
+                v = net.get_vnic(att.vnic_id).data
+                if getattr(v, "is_primary", False):
+                    ip = v.public_ip
+                    break
+        progress(f"✅ 创建完成,公网 IP:{ip or '(暂未分配)'}")
+        return {"instance_id": iid, "public_ip": ip, "state": st}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 实例列表 / 电源 / 属性
+
+def _ad_short(ad: str | None) -> str:
+    return (ad or "").rsplit(":", 1)[-1]
+
+
+def list_instances(acct: dict) -> list[dict]:
+    """枚举该账户(该区域)下所有活动区间中的实例。"""
+    try:
+        return _list_instances_impl(acct)
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def _list_instances_impl(acct: dict) -> list[dict]:
+    oci = _sdk()
+    cfg = build_config(acct)
+    identity = _client(oci, oci.identity.IdentityClient, cfg)
+    compute = _client(oci, oci.core.ComputeClient, cfg)
+    net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+
+    rows: list[dict] = []
+    for comp_id, comp_name in _iter_compartments(identity, cfg["tenancy"]):
+        try:
+            instances = oci.pagination.list_call_get_all_results(
+                compute.list_instances, comp_id
+            ).data
+        except Exception as e:  # noqa: BLE001
+            log.warning("列举区间 %s 失败:%s", comp_name, e)
+            continue
+
+        for ins in instances:
+            if (ins.lifecycle_state or "").upper() == "TERMINATED":
+                continue
+            sc = ins.shape_config
+            row = {
+                "account_id": acct["id"],
+                "account_name": acct["name"],
+                "region": cfg["region"],
+                "compartment_id": comp_id,
+                "compartment_name": comp_name,
+                "id": ins.id,
+                "name": ins.display_name,
+                "state": (ins.lifecycle_state or "").upper(),
+                "shape": ins.shape,
+                "ocpus": getattr(sc, "ocpus", None) if sc else None,
+                "mem_gbs": getattr(sc, "memory_in_gbs", None) if sc else None,
+                "boot_gbs": None,
+                "boot_volume_id": None,
+                "ad": _ad_short(ins.availability_domain),
+                "public_ip": None,
+                "public_lifetime": None,
+                "private_ip": None,
+                "vnic_id": None,
+                "time_created": (ins.time_created.strftime("%Y-%m-%d %H:%M") if ins.time_created else ""),
+            }
+
+            # 主 VNIC 与公网 IP(区分临时/保留)
+            try:
+                for att in oci.pagination.list_call_get_all_results(
+                    compute.list_vnic_attachments, comp_id, instance_id=ins.id
+                ).data:
+                    if att.lifecycle_state != "ATTACHED":
+                        continue
+                    v = net.get_vnic(att.vnic_id).data
+                    if getattr(v, "is_primary", False):
+                        row["public_ip"] = v.public_ip
+                        row["private_ip"] = v.private_ip
+                        row["vnic_id"] = v.id
+                        if v.public_ip:
+                            try:
+                                pub = net.get_public_ip_by_ip_address(
+                                    oci.core.models.GetPublicIpByIpAddressDetails(ip_address=v.public_ip)
+                                ).data
+                                row["public_lifetime"] = pub.lifetime if pub else None
+                            except Exception:  # noqa: BLE001
+                                pass
+                        break
+            except Exception as e:  # noqa: BLE001
+                log.warning("查询实例 %s VNIC 失败:%s", ins.display_name, e)
+
+            # 启动盘
+            try:
+                boots = compute.list_boot_volume_attachments(
+                    compartment_id=comp_id,
+                    availability_domain=ins.availability_domain,
+                    instance_id=ins.id,
+                ).data
+                if boots:
+                    bs = _client(oci, oci.core.BlockstorageClient, cfg)
+                    bv = bs.get_boot_volume(boots[0].boot_volume_id).data
+                    row["boot_gbs"] = bv.size_in_gbs
+                    row["boot_volume_id"] = bv.id
+            except Exception as e:  # noqa: BLE001
+                log.debug("查询实例 %s 启动盘失败:%s", ins.display_name, e)
+
+            rows.append(row)
+
+    rows.sort(key=lambda r: (r["account_name"], r["region"], r["name"]))
+    return rows
+
+
+def instance_op(acct: dict, compartment_id: str, instance_id: str, op: str) -> dict:
+    if op not in ALLOWED_OPS:
+        raise OciError(f"不支持的操作:{op}")
+    try:
+        oci = _sdk()
+        compute = _client(oci, oci.core.ComputeClient, build_config(acct))
+        compute.instance_action(instance_id, compartment_id, action=op)
+        return {"started": True, "op": op}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def rename_instance(acct: dict, instance_id: str, display_name: str) -> dict:
+    try:
+        oci = _sdk()
+        compute = _client(oci, oci.core.ComputeClient, build_config(acct))
+        compute.update_instance(instance_id, oci.core.models.UpdateInstanceDetails(
+            display_name=display_name))
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def resize_instance(acct: dict, instance_id: str, ocpus: float, mem_gbs: float) -> dict:
+    """升降配(A1.Flex 等弹性形状要求先关机)。"""
+    try:
+        oci = _sdk()
+        compute = _client(oci, oci.core.ComputeClient, build_config(acct))
+        compute.update_instance(instance_id, oci.core.models.UpdateInstanceDetails(
+            shape_config=oci.core.models.UpdateInstanceShapeConfigDetails(
+                ocpus=ocpus, memory_in_gbs=mem_gbs)))
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def enable_monitoring_plugin(acct: dict, instance_id: str) -> dict:
+    """开启 Oracle Cloud Agent 的 Compute Instance Monitoring(流量统计依赖它)。"""
+    try:
+        oci = _sdk()
+        compute = _client(oci, oci.core.ComputeClient, build_config(acct))
+        compute.update_instance(instance_id, oci.core.models.UpdateInstanceDetails(
+            agent_config=oci.core.models.UpdateInstanceAgentConfigDetails(
+                plugins_config=[oci.core.models.InstanceAgentPluginConfigDetails(
+                    name="Compute Instance Monitoring",
+                    desired_state="ENABLED")])))
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def terminate_instance(acct: dict, instance_id: str, preserve_boot_volume: bool) -> dict:
+    try:
+        oci = _sdk()
+        compute = _client(oci, oci.core.ComputeClient, build_config(acct))
+        compute.terminate_instance(instance_id, preserve_boot_volume=preserve_boot_volume)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 更换公网 IP
+
+def _wait_state(compute, instance_id: str, targets: set[str], cb, timeout: int = 420):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        cur = (compute.get_instance(instance_id).data.lifecycle_state or "").upper()
+        if cur != last:
+            cb(f"实例状态:{cur}")
+            last = cur
+        if cur in targets:
+            return cur
+        time.sleep(5)
+    raise OciError("等待实例状态变更超时,请稍后到控制台确认")
+
+
+def _primary_vnic(oci, cfg, compartment_id: str, instance_id: str):
+    """查主 VNIC:附件列表来自 Compute API,VNIC 详情来自 Network API。"""
+    compute = _client(oci, oci.core.ComputeClient, cfg)
+    net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+    for att in compute.list_vnic_attachments(compartment_id, instance_id=instance_id).data:
+        if att.lifecycle_state == "ATTACHED":
+            v = net.get_vnic(att.vnic_id).data
+            if getattr(v, "is_primary", False):
+                return v
+    raise OciError("未找到实例的主 VNIC")
+
+
+def change_public_ip(progress, acct: dict, compartment_id: str, instance_id: str) -> dict:
+    """更换临时公网 IP:运行中则先软关机 → 删除旧临时IP → 开机获得新IP。"""
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        compute = _client(oci, oci.core.ComputeClient, cfg)
+        net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+
+        orig = (compute.get_instance(instance_id).data.lifecycle_state or "").upper()
+        if orig == "RUNNING":
+            progress("实例运行中,先软关机…")
+            compute.instance_action(instance_id, compartment_id, action="SOFTSTOP")
+            _wait_state(compute, instance_id, {"STOPPED"}, progress)
+        else:
+            progress(f"实例当前状态 {orig},无需关机")
+
+        vnic = _primary_vnic(oci, cfg, compartment_id, instance_id)
+        old_ip = vnic.public_ip
+        progress(f"当前公网 IP:{old_ip or '无'}")
+
+        if old_ip:
+            try:
+                pub = net.get_public_ip_by_ip_address(
+                    oci.core.models.GetPublicIpByIpAddressDetails(ip_address=old_ip)
+                ).data
+                if pub and pub.lifetime == "EPHEMERAL":
+                    net.delete_public_ip(pub.id)
+                    progress(f"已释放临时公网 IP {old_ip}")
+                elif pub:
+                    progress("检测到保留公网 IP,跳过删除(如需更换请先解绑)")
+            except Exception as e:  # noqa: BLE001
+                progress(f"查询/释放公网 IP 时出现问题:{e}")
+
+        if orig in ("RUNNING", "STARTING"):
+            progress("重新启动实例以获取新 IP …")
+            compute.instance_action(instance_id, compartment_id, action="START")
+            _wait_state(compute, instance_id, {"RUNNING"}, progress)
+
+        new_ip = net.get_vnic(vnic.id).data.public_ip
+        progress(f"新公网 IP:{new_ip}")
+        return {"old_ip": old_ip, "new_ip": new_ip}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ IPv6
+
+def net_info(acct: dict, compartment_id: str, instance_id: str) -> dict:
+    """主 VNIC 网络信息:IPv4 类型、IPv6 地址列表、子网是否支持 IPv6。"""
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+        vnic = _primary_vnic(oci, cfg, compartment_id, instance_id)
+
+        subnet = net.get_subnet(vnic.subnet_id).data
+        ipv4_type = None
+        if vnic.public_ip:
+            pub = net.get_public_ip_by_ip_address(
+                oci.core.models.GetPublicIpByIpAddressDetails(ip_address=vnic.public_ip)).data
+            ipv4_type = pub.lifetime if pub else None
+        return {
+            "vnic_id": vnic.id,
+            "private_ip": vnic.private_ip,
+            "public_ip": vnic.public_ip,
+            "public_lifetime": ipv4_type,
+            "ipv6_addresses": list(getattr(vnic, "ipv6_addresses", None) or []),
+            "subnet_ipv6_ready": bool(getattr(subnet, "ipv6_cidr_blocks", None)),
+            "subnet_name": subnet.display_name or subnet.id[-12:],
+        }
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def add_ipv6(acct: dict, compartment_id: str, instance_id: str) -> dict:
+    """为主 VNIC 附加一个 IPv6(若子网启用 IPv6 且 VCN 有互联网关,则同时分配公网 IPv6)。"""
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+        vnic = _primary_vnic(oci, cfg, compartment_id, instance_id)
+        res = net.create_ipv6(vnic.id, oci.core.models.CreateIpv6Details(
+            vnic_subnet_id=vnic.subnet_id, is_public_ip_enabled=True)).data
+        return {"ipv6": getattr(res, "ip_address", None),
+                "public_ipv6": getattr(res, "public_ip_address", None)}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 保留公网 IP
+
+def list_reserved_ips(acct: dict, compartment_id: str) -> list[dict]:
+    try:
+        oci = _sdk()
+        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        out = []
+        for p in oci.pagination.list_call_get_all_results(
+            net.list_public_ips, "REGION", compartment_id=compartment_id,
+            lifetime="RESERVED",
+        ).data:
+            out.append({
+                "id": p.id, "ip_address": p.ip_address,
+                "assigned": bool(getattr(p, "private_ip_id", None)),
+            })
+        return out
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def create_reserved_ip(acct: dict, compartment_id: str) -> dict:
+    try:
+        oci = _sdk()
+        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        p = net.create_public_ip(oci.core.models.CreatePublicIpDetails(
+            compartment_id=compartment_id, lifetime="RESERVED")).data
+        return {"id": p.id, "ip_address": p.ip_address}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def delete_reserved_ip(acct: dict, public_ip_id: str) -> dict:
+    try:
+        oci = _sdk()
+        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        net.delete_public_ip(public_ip_id)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def bind_reserved_ip(acct: dict, public_ip_id: str, vnic_id: str, bind: bool) -> dict:
+    """绑定/解绑 保留IP 到 VNIC 主私网 IP。"""
+    try:
+        oci = _sdk()
+        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        priv_ip_id = None
+        if bind:
+            ips = oci.pagination.list_call_get_all_results(
+                net.list_private_ips, vnic_id=vnic_id).data
+            primary = next((i for i in ips if getattr(i, "is_primary", False)), None) or (
+                ips[0] if ips else None)
+            if not primary:
+                raise OciError("未找到 VNIC 的私网 IP")
+            priv_ip_id = primary.id
+        net.update_public_ip(public_ip_id, oci.core.models.UpdatePublicIpDetails(
+            private_ip_id=priv_ip_id))
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 安全组端口
+
+def open_ports(acct: dict, compartment_id: str, instance_id: str, ports: list[int]) -> dict:
+    """向主 VNIC 所在子网的全部安全列表追加 TCP 入站规则(全网段),已存在则跳过。"""
+    try:
+        oci = _sdk()
+        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        vnic = _primary_vnic(oci, cfg, compartment_id, instance_id)
+        subnet = net.get_subnet(vnic.subnet_id).data
+
+        added, skipped = [], []
+
+        def _has(rules, port, src):
+            for r in rules:
+                if r.protocol == "6" and r.source == src:
+                    rng = getattr(r.tcp_options, "destination_port_range", None) if r.tcp_options else None
+                    if rng is None:
+                        return True  # 全端口放行
+                    lo, hi = getattr(rng, "min", None), getattr(rng, "max", None)
+                    if lo is not None and hi is not None and lo <= port <= hi:
+                        return True
+            return False
+
+        for sl_id in subnet.security_list_ids or []:
+            sl = net.get_security_list(sl_id).data
+            rules = list(sl.ingress_security_rules or [])
+            new_rules = []
+            for port in ports:
+                for src in ("0.0.0.0/0", "::/0"):
+                    if _has(rules, port, src):
+                        skipped.append(f"{port}/{'v6' if ':' in src else 'v4'}")
+                        continue
+                    new_rules.append(oci.core.models.IngressSecurityRule(
+                        protocol="6", source=src, source_type="CIDR_BLOCK",
+                        tcp_options=oci.core.models.TcpOptions(
+                            destination_port_range=oci.core.models.PortRange(
+                                min=port, max=port))))
+                    added.append(f"{port}/{'v6' if ':' in src else 'v4'}")
+            if new_rules:
+                net.update_security_list(sl_id, oci.core.models.UpdateSecurityListDetails(
+                    ingress_security_rules=rules + new_rules))
+        return {"added": added, "skipped": skipped}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 卷(启动盘)
+
+def get_boot_volume(acct: dict, compartment_id: str, instance_id: str) -> dict:
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        compute = _client(oci, oci.core.ComputeClient, cfg)
+        boots = compute.list_boot_volume_attachments(
+            compartment_id=compartment_id, instance_id=instance_id).data
+        if not boots:
+            raise OciError("未找到启动盘附件")
+        bs = _client(oci, oci.core.BlockstorageClient, cfg)
+        bv = bs.get_boot_volume(boots[0].boot_volume_id).data
+        return {"id": bv.id, "size_in_gbs": bv.size_in_gbs,
+                "vpus_per_gb": bv.vpus_per_gb, "state": bv.lifecycle_state}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def update_boot_volume(acct: dict, boot_volume_id: str,
+                       size_in_gbs: int | None = None, vpus_per_gb: int | None = None) -> dict:
+    """扩容(只能增大)或调整 VPU 性能层级。"""
+    try:
+        oci = _sdk()
+        bs = _client(oci, oci.core.BlockstorageClient, build_config(acct))
+        kw = {}
+        if size_in_gbs:
+            kw["size_in_gbs"] = size_in_gbs
+        if vpus_per_gb:
+            kw["vpus_per_gb"] = vpus_per_gb
+        if not kw:
+            raise OciError("未指定任何修改项")
+        bv = bs.update_boot_volume(boot_volume_id, oci.core.models.UpdateBootVolumeDetails(**kw)).data
+        return {"id": bv.id, "size_in_gbs": bv.size_in_gbs, "vpus_per_gb": bv.vpus_per_gb}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 配额与订阅
+
+_QUOTA_LIMIT_NAMES = [
+    "standard-a1-core-count",
+    "standard-a1-memory-count",
+    "standard-e2-micro-count",
+]
+
+
+def account_quota(acct: dict) -> dict:
+    """查询 compute 服务关键配额在各可用域的 用量/余量,以及订阅类型(FREE_TIER/PAYG)。"""
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        limits = _client(oci, oci.limits.LimitsClient, cfg)
+        identity = _client(oci, oci.identity.IdentityClient, cfg)
+        tenancy = cfg["tenancy"]
+
+        svc = next((s.name for s in limits.list_services(compartment_id=tenancy).data
+                    if s.name == "compute"), None)
+        if not svc:
+            raise OciError("未找到 compute 服务限额")
+
+        wanted = set()
+        try:
+            defs = oci.pagination.list_call_get_all_results(
+                limits.list_limit_definitions, tenancy, service_name=svc).data
+        except Exception:  # noqa: BLE001
+            defs = oci.pagination.list_call_get_all_results(
+                limits.list_limit_definitions, tenancy).data
+        for d in defs:
+            if d.name in _QUOTA_LIMIT_NAMES:
+                wanted.add((d.name, d.description))
+
+        ads = [ad.name for ad in identity.list_availability_domains(tenancy).data]
+
+        limits_out = []
+        for lname, desc in sorted(wanted):
+            items = []
+            for ad in ads:
+                ra = limits.get_resource_availability(
+                    svc, lname, tenancy, availability_domain=ad).data
+                items.append({
+                    "ad": _ad_short(ad),
+                    "available": getattr(ra, "available", None),
+                    "used": getattr(ra, "used", None),
+                })
+            limits_out.append({"name": lname, "description": desc, "items": items})
+
+        # 订阅类型(免费层 / PAYG):需先找 home region
+        payment_model = None
+        try:
+            regions = identity.list_region_subscriptions(tenancy).data
+            home = next((r.region_name for r in regions
+                         if getattr(r, "is_home_region", False)), None)
+            if home:
+                sub_cli = _client(oci, oci.osp_gateway.SubscriptionServiceClient, cfg)
+                subs = sub_cli.list_subscriptions(home, compartment_id=tenancy).data.items
+                if subs:
+                    payment_model = getattr(subs[0], "payment_model", None)
+        except Exception as e:  # noqa: BLE001
+            log.info("查询订阅类型失败(不影响配额展示):%s", e)
+
+        return {"region": cfg["region"], "limits": limits_out, "payment_model": payment_model}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+# ================================================================ 流量统计
+
+def traffic_usage(acct: dict, compartment_id: str, hours: int = 24) -> dict:
+    """通过 oci_computeagent 监控指标统计区间内 VNIC 进/出流量(需实例启用监控插件)。"""
+    try:
+        return _traffic_impl(acct, compartment_id, min(max(hours, 1), 24 * 90))
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def _traffic_impl(acct: dict, compartment_id: str, hours: int) -> dict:
+    oci = _sdk()
+    mon = _client(oci, oci.monitoring.MonitoringClient, build_config(acct))
+
+    end = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start = end - dt.timedelta(hours=hours)
+    # 按时间范围自适应聚合粒度,控制点数
+    window = "1h" if hours <= 72 else ("6h" if hours <= 240 else "1d")
+
+    series: dict[int, dict] = {}
+    totals = {"down": 0.0, "up": 0.0}
+
+    for metric, key in (("VnicFromNetworkBytes", "down"), ("VnicToNetworkBytes", "up")):
+        details = oci.monitoring.models.SummarizeMetricsDataDetails(
+            namespace="oci_computeagent",
+            query=f"{metric}[{window}].sum()",
+            start_time=start,
+            end_time=end,
+        )
+        data = mon.summarize_metrics_data(compartment_id, details).data
+        for md in data:
+            for ts, val in zip(md.timestamps, md.aggregated_samples):
+                bucket = int(ts.timestamp())
+                slot = series.setdefault(bucket, {"t": ts.isoformat(), "down": 0.0, "up": 0.0})
+                slot[key] += float(val or 0)
+                totals[key] += float(val or 0)
+
+    points = [series[k] for k in sorted(series)]
+    return {"hours": hours, "window": window, "points": points,
+            "total_down_bytes": totals["down"], "total_up_bytes": totals["up"]}
