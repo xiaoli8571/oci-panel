@@ -246,23 +246,40 @@ def _run_reip(chat_id: str, arg: str) -> str:
     if err or not m:
         return err or "未找到实例"
     r = m[0]
-    if r.get("provider") != "oci":
-        return "⚠ 换 IP 目前仅支持 OCI 实例"
+    if r.get("provider") not in ("oci", "aws"):
+        return "⚠ 换 IP 仅支持 OCI / AWS 实例"
+    from . import jobs
     from .database import db
     with db() as c:
         acct_row = c.execute("SELECT * FROM accounts WHERE id=?", (r["account_id"],)).fetchone()
     if not acct_row:
         return "⚠ 账户不存在"
-    _reply(chat_id, f"⏳ 开始更换「{r['name']}」的公网 IP,预计 1~3 分钟…")
+    _reply(chat_id, f"⏳ 开始更换「{r['name']}」的公网 IP(后台任务,预计 1~5 分钟)…")
+    acct = dict(acct_row)
+    if r["provider"] == "oci":
+        def _job(progress):
+            res = oci_client.change_public_ip(progress, acct, r["compartment_id"], r["id"])
+            with _snap_lock:
+                _snap["ts"] = 0
+            return res
+        job = jobs.start_job(f"tg_reip_{r['name']}", _job)
+        return (f"📤 任务已提交(job {job['id'][:8]}…)\n完成后新 IP 会写进任务日志;"
+                f"\n也可稍后用 /ip {r['name']} 查看")
+    # AWS EC2 / Lightsail 同步执行(带进度消息)
+    from . import aws_cloud
+
+    def progress(msg):
+        pass
     try:
-        res = oci_client.change_public_ip(lambda msg: None,
-                                          dict(acct_row), r["compartment_id"], r["id"])
-        new_ip = res.get("new_ip") or "(未获取到)"
-        with _snap_lock:
-            _snap["ts"] = 0
-        return f"✅ {r['name']} 换 IP 完成:\n旧:{res.get('old_ip') or '无'} → 新:{new_ip}"
+        if r.get("service") == "lightsail":
+            res = aws_cloud.lightsail_change_ip(progress, acct, r.get("region") or "", r["id"])
+        else:
+            res = aws_cloud.change_public_ip(progress, acct, "", r["id"])
     except Exception as e:  # noqa: BLE001
         return f"⚠ 换 IP 失败:{e}"
+    with _snap_lock:
+        _snap["ts"] = 0
+    return f"✅ {r['name']} 换 IP 完成:\n旧:{res.get('old_ip') or '无'} → 新:{res.get('new_ip') or '(未获取到)'}"
 
 
 def _run_open(chat_id: str, arg: str) -> str:

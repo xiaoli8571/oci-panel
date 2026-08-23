@@ -931,3 +931,70 @@ def oci_pagination(fn, *args, **kw):
     """oci.pagination.list_call_get_all_results 的本地包装(避免模块顶部 import oci)。"""
     oci = _sdk()
     return oci.pagination.list_call_get_all_results(fn, *args, **kw)
+
+def launch_from_boot_volume(progress, acct: dict, d: dict) -> dict:
+    """用已有启动盘创建新实例(原实例须已终止且保留启动盘,或使用分离的启动盘)。
+
+    d: {compartment_id, name, ad, subnet_id, boot_volume_id, ssh_key}
+    """
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        compute = _client(oci, oci.core.ComputeClient, cfg)
+        progress(f"提交从启动盘开机请求({d['boot_volume_id'][:24]}…) …")
+        details = oci.core.models.LaunchInstanceDetails(
+            availability_domain=d["ad"],
+            compartment_id=d["compartment_id"],
+            display_name=d["name"],
+            shape=d.get("shape") or "VM.Standard.A1.Flex",
+            shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
+                ocpus=d.get("ocpus"), memory_in_gbs=d.get("mem_gbs")
+            ) if d.get("ocpus") else None,
+            source_details=oci.core.models.InstanceSourceViaBootVolumeDetails(
+                boot_volume_id=d["boot_volume_id"]),
+            create_vnic_details=oci.core.models.CreateVnicDetails(
+                subnet_id=d["subnet_id"], assign_public_ip=True, display_name=f"{d['name']}-vnic"),
+            metadata={"ssh_authorized_keys": d.get("ssh_key", "")},
+            is_pv_encryption_in_transit_enabled=True,
+        )
+        ins = compute.launch_instance(details).data
+        progress(f"实例已提交:{ins.id}")
+        st = None
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            st = (compute.get_instance(ins.id).data.lifecycle_state or "").upper()
+            if st in ("RUNNING", "FAILED", "TERMINATED"):
+                break
+            time.sleep(10)
+        net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+        ip = None
+        for att in compute.list_vnic_attachments(d["compartment_id"], instance_id=ins.id).data:
+            if att.lifecycle_state == "ATTACHED":
+                v = net.get_vnic(att.vnic_id).data
+                if getattr(v, "is_primary", False):
+                    ip = v.public_ip
+                    break
+        progress(f"✅ 开机完成,状态:{st},公网 IP:{ip or '(暂未分配)'}")
+        return {"instance_id": ins.id, "public_ip": ip, "state": st}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+def list_available_boot_volumes(acct: dict, compartment_id: str) -> list[dict]:
+    """列出区间内 AVAILABLE 状态的启动盘(含所属 AD 与大小)。"""
+    try:
+        oci = _sdk()
+        cfg = build_config(acct)
+        bs = _client(oci, oci.core.BlockstorageClient, cfg)
+        out = []
+        for bv in oci_pagination(bs.list_boot_volumes, compartment_id=compartment_id).data:
+            if (bv.lifecycle_state or "").upper() != "AVAILABLE":
+                continue
+            out.append({
+                "id": bv.id,
+                "name": getattr(bv, "display_name", "") or bv.id[-12:],
+                "size_in_gbs": bv.size_in_gbs,
+                "ad": _ad_short(getattr(bv, "availability_domain", "")),
+            })
+        return out
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e

@@ -124,6 +124,35 @@ def terminate(body: TerminateReq):
     return oci_client.terminate_instance(acct, body.instance_id, body.preserve_boot_volume)
 
 
+@router.post("/instances/boot-launch")
+def boot_launch(body: dict):
+    """从现有启动盘创建实例(原实例需已终止且保留了启动盘)。"""
+    acct = _get_account(int(body.get("account_id") or 0))
+    d = {
+        "compartment_id": str(body.get("compartment_id") or ""),
+        "name": str(body.get("name") or "").strip(),
+        "ad": str(body.get("ad") or ""),
+        "subnet_id": str(body.get("subnet_id") or ""),
+        "boot_volume_id": str(body.get("boot_volume_id") or ""),
+        "ssh_key": str(body.get("ssh_key") or ""),
+        "shape": str(body.get("shape") or "VM.Standard.A1.Flex"),
+        "ocpus": body.get("ocpus"), "mem_gbs": body.get("mem_gbs"),
+    }
+    if not _NAME_RE.match(d["name"]):
+        raise HTTPException(400, "实例名称需以字母开头,仅含字母/数字/._-")
+    if not d["compartment_id"] or not d["ad"] or not d["subnet_id"] or not d["boot_volume_id"]:
+        raise HTTPException(400, "缺少必要参数(区间/AD/子网/启动盘)")
+    job = jobs.start_job("boot_launch", oci_client.launch_from_boot_volume, acct, d)
+    return {"job_id": job["id"]}
+
+
+@router.get("/net/boot-volumes")
+def list_boot_volumes(account_id: int, compartment_id: str):
+    """列出区间内全部可用启动盘(供从启动盘开机选择)。"""
+    from ..oci_client import list_available_boot_volumes
+    return {"items": list_available_boot_volumes(_get_account(account_id), compartment_id)}
+
+
 # ---------------------------------------------------------------- 网络
 
 @router.get("/net/info")

@@ -647,11 +647,13 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
       <span class="chip" id="cp-aws" onclick="setCreatePlatform('aws')">AWS Lightsail</span>
       <span class="chip on" id="chip-amd" style="margin-left:6px" onclick="setPreset('amd')">AMD 微型 1C/1G(永远免费)</span>
       <span class="chip" id="chip-arm" onclick="setPreset('arm')">ARM A1.Flex 2C/12G(可强开)</span>
+      <span class="chip" id="chip-bootvol" style="margin-left:6px" onclick="setPreset('bootvol')">💾 从启动盘开机</span>
     </div>
     <div class="grid2">
       <div><label>账户 *</label><select id="c-acct" onchange="onCreateAcct()"></select></div>
       <div><label>区间 Compartment *</label><select id="c-comp" onchange="onCreateComp()"></select></div>
-      <div><label>可用域 AD *</label><select id="c-ad"></select></div>
+      <div><label>可用域 AD *</label><select id="c-ad"></select>
+        <p class="hint" id="c-bv-hint" style="display:none">💾 已按所选启动盘自动匹配 AD(启动盘与实例必须同 AD)</p></div>
       <div><label>子网(公网子网)*</label><select id="c-subnet"></select></div>
       <div><label>实例名称 *</label><input id="c-name" value="my-instance"></div>
       <div><label>启动盘(GB)</label><input id="c-boot" type="number" value="50" min="47" max="2048"></div>
@@ -661,6 +663,8 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
       <div><label>系统镜像 *</label><select id="c-image"><option value="">请先选择账户与区间</option></select></div>
       <div id="c-ocpus-box" style="display:none"><label>OCPU 数</label><input id="c-ocpus" type="number" value="2" min="1" max="64" step="1"></div>
       <div id="c-mem-box" style="display:none"><label>内存(GB)</label><input id="c-mem" type="number" value="12" min="1" max="1024" step="1"></div>
+      <div id="c-bv-box" style="display:none;grid-column:1/-1"><label>现有启动盘 *(仅列出 AVAILABLE 状态;原实例须已终止并保留启动盘)</label>
+        <select id="c-bv" onchange="onBvPick()"><option value="">请先选择账户与区间</option></select></div>
       <div id="c-retry-box" style="display:none"><label>强开:容量不足重试次数</label><input id="c-retry" type="number" value="30" min="1" max="100"></div>
       <div id="c-delay-box" style="display:none"><label>强开:重试间隔(秒)</label><input id="c-delay" type="number" value="60" min="10" max="300"></div>
       <div style="grid-column:1/-1"><label>SSH 公钥 *</label>
@@ -1137,7 +1141,7 @@ function setCreatePlatform(p) {
   const aws = p === "aws";
   $("#createSub").textContent = aws ? "AWS Lightsail 创建:选择区域、镜像与套餐" : "预设一键预填规格;ARM A1 支持容量不足自动重试(强开模式)";
   // 切换字段可见性:OCI 字段组 / AWS 字段组
-  const ociFields = ["c-comp", "c-ad", "c-subnet", "c-boot", "c-os", "c-image", "c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box"];
+  const ociFields = ["c-comp", "c-ad", "c-subnet", "c-boot", "c-os", "c-image", "c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box", "c-bv-box"];
   ociFields.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = aws ? "none" : ""; });
   document.getElementById("awsCreateFields").hidden = !aws;
   // OCI 的 SSH 公钥仍显示(两边都需要)
@@ -1191,11 +1195,32 @@ async function onAwsRegion() {
 let presetKind = null;
 function setPreset(k) {
   presetKind = k;
+  const arm = k === "arm";
+  const bv = k === "bootvol";
   $("#chip-amd").classList.toggle("on", k === "amd");
   $("#chip-arm").classList.toggle("on", k === "arm");
-  const arm = k === "arm";
-  ["c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box"].forEach(id => $("#" + id).style.display = arm ? "" : "none");
-  loadImages();
+  $("#chip-bootvol").classList.toggle("on", bv);
+  ["c-ocpus-box", "c-mem-box"].forEach(id => $("#" + id).style.display = (arm || bv) ? "" : "none");
+  // bootvol 模式:隐藏 镜像/系统/启动盘大小/强开;显示启动盘选择;OCPU 默认 1C/6G
+  ["c-image", "c-os"].forEach(id => { const el = document.getElementById(id); if (el) el.parentElement.style.display = bv ? "none" : ""; });
+  document.getElementById("c-boot").parentElement.style.display = bv ? "none" : "";
+  ["c-retry-box", "c-delay-box"].forEach(id => $("#" + id).style.display = arm ? "" : "none");
+  $("#c-bv-box").style.display = bv ? "" : "none";
+  if (bv) { $("#c-ocpus").value = 1; $("#c-mem").value = 6; loadBootVolumes(); }
+  else loadImages();
+}
+async function loadBootVolumes() {
+  const aid = +$("#c-acct").value, comp = $("#c-comp").value;
+  const sel = $("#c-bv");
+  if (!comp) { sel.innerHTML = '<option value="">请先选择区间</option>'; return; }
+  sel.innerHTML = '<option>加载中…</option>';
+  try {
+    const d = await api(`/api/net/boot-volumes?account_id=${aid}&compartment_id=${encodeURIComponent(comp)}`);
+    sel.innerHTML = d.items.length
+      ? d.items.map(x => `<option value="${x.id}" data-ad="${esc(x.ad)}" data-gbs="${x.size_in_gbs}">
+          ${esc(x.name)} · ${x.size_in_gbs}GB · ${esc(x.ad)}</option>`).join("")
+      : `<option value="">该区间无可用启动盘(需实例终止时保留启动盘)</option>`;
+  } catch (e) { sel.innerHTML = `<option value="">${esc(e.message)}</option>`; }
 }
 async function openCreate() {
   const ocis = acctItems.filter(a => (a.provider || "oci") === "oci");
@@ -1257,6 +1282,14 @@ async function loadImages() {
       || `<option value="">未找到镜像</option>`;
   } catch (e) { $("#c-image").innerHTML = `<option value="">${esc(e.message)}</option>`; }
 }
+function onBvPick() {
+  const opt = $("#c-bv").selectedOptions[0];
+  const hint = $("#c-bv-hint");
+  if (!opt || !opt.dataset.ad) { hint.style.display = "none"; return; }
+  $("#c-ad").value = opt.dataset.ad;
+  hint.style.display = "";
+  hint.textContent = `💾 已自动匹配 AD:${opt.dataset.ad}(启动盘 ${opt.dataset.gbs}GB 与实例须同 AD)`;
+}
 async function submitCreate() {
   const v = $("#c-acct").value || "";
   if (v.split(":")[0] === "aws") {
@@ -1276,6 +1309,31 @@ async function submitCreate() {
       const d = await api("/api/aws/lightsail-create", { method: "POST", body: JSON.stringify(body) });
       toast(`创建指令已下发:${body.name}(${body.region})`, "ok");
       setTimeout(loadInstances, 8000);
+    } catch (e) { toast(e.message, "err"); }
+    return;
+  }
+  if (presetKind === "bootvol") {
+    const bvId = $("#c-bv").value;
+    if (!bvId) return toast("请选择现有启动盘", "err");
+    const body = {
+      account_id: +(v.split(":")[1] || $("#c-acct").value),
+      compartment_id: $("#c-comp").value,
+      name: $("#c-name").value.trim(),
+      ad: $("#c-ad").value,
+      subnet_id: $("#c-subnet").value,
+      boot_volume_id: bvId,
+      ssh_key: $("#c-ssh").value.trim(),
+      shape: "VM.Standard.A1.Flex",
+      ocpus: +$("#c-ocpus").value || 1,
+      mem_gbs: +$("#c-mem").value || 6,
+    };
+    if (!body.name) return toast("请填写实例名称", "err");
+    if (!body.subnet_id) return toast("请选择公网子网", "err");
+    if (!body.ad) return toast("请选择可用域(或先选启动盘自动匹配)", "err");
+    hide("createModal");
+    try {
+      const d = await api("/api/instances/boot-launch", { method: "POST", body: JSON.stringify(body) });
+      openJob("从启动盘开机 · " + body.name, d.job_id);
     } catch (e) { toast(e.message, "err"); }
     return;
   }
