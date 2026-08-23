@@ -4,6 +4,16 @@
 
 ## 🚦 更新日志
 
+### v0.12.0(Telegram Bot 控制 + A1 配额体检)
+
+- 🤖 **Telegram Bot 指令控制**(对标 R探长 核心能力):在守护中心启用后,直接在 TG 里管理服务器
+  - 指令:`/status` `/list` `/ip` `/on` `/off` `/reboot` `/quota` `/dom` `/guard` `/ping` `/help`
+  - 名称模糊匹配 / IP 精确匹配;多台命中给序号候选(`/on 2`)
+  - 支持 OCI(EC2/Lightsail 同理 AWS);仅响应配置的 Chat ID,其他会话忽略
+  - 长轮询独立线程,offset 持久化,重启不重复处理积压消息
+- 🩺 **A1 配额体检**:一键扫描所有 OCI 账户各 AD 的 A1 核/内存余量 + 在跑 A1.Flex 实例清单,
+  支持一键降配(1C6G / 2C12G)腾出免费额度(降配需实例先关机)
+
 ### v0.11.1(浅色主题)
 
 - ☀️ **浅色主题**:顶栏新增主题切换按钮;默认跟随系统 `prefers-color-scheme`,手动选择后记忆于浏览器
@@ -145,7 +155,7 @@ docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
 | AWS EC2/Lightsail 管理 | ✅ 基础 | ✅ 更全 |
 | Cloudflare DNS/Workers | ✅ | ✅ DNS |
 | 部署形态 | 单容器 · 无外部依赖 · 开源可审计 | 双端架构(TG Bot+客户端)· 闭源二进制 |
-| Telegram Bot 全功能控制 | 🗺 规划中 | ✅ |
+| Telegram Bot 指令控制 | ✅ v0.12(指令子集) | ✅ 更全 |
 | GCP/Azure/DO/SolusVM/VirtFusion | ❌ 暂不支持 | ✅ |
 | 串行控制台 / 对象存储 / ACME 证书 | ❌ 暂不支持 | ✅ |
 | A1 配额体检与降配抢占 | 部分(配额查询已有) | ✅ |
@@ -154,8 +164,8 @@ docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
 
 ## 🗺 Roadmap
 
-- [ ] Telegram Bot 指令控制(查询/开关机/换IP)
-- [ ] A1 配额体检 + 一键降配抢占
+- [x] Telegram Bot 指令控制(状态/开关机/重启/配额/域名监控)
+- [x] A1 配额体检 + 一键降配(抢占式开机重试创建时已有)
 - [ ] OCI 对象存储(Object Storage)管理
 - [ ] 串行控制台连接
 - [ ] 服务限额(Limits)一键检测可开机器数

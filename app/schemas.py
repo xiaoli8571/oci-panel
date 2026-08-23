@@ -158,6 +158,7 @@ class WorkerDeploy(BaseModel):
 class TgReq(BaseModel):
     bot_token: str = Field(default="", max_length=200)
     chat_id: str = Field(default="", max_length=64)
+    enabled: bool = False   # 是否启用 Telegram Bot 指令控制
 
 
 class PasswordReq(BaseModel):

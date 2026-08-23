@@ -92,6 +92,16 @@ def set_tg(bot_token: str, chat_id: str) -> None:
     database.set_kv("tg_chat_id", chat_id.strip())
 
 
+def tg_enabled() -> bool:
+    from . import tgbot
+    return tgbot.enabled()
+
+
+def set_tg_enabled(v: bool) -> None:
+    from . import tgbot
+    tgbot.set_enabled(v)
+
+
 def send_tg(token: str, chat_id: str, text: str) -> None:
     """通过 Telegram Bot API 发送消息;失败抛 ProviderError(带官方描述)。"""
     try:

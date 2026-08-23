@@ -284,6 +284,10 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
     </div>
     <div id="instErrors"></div>
     <div class="qcard" style="margin-top:14px">
+      <h4>🩺 A1 配额体检 <button class="btn-ghost" style="float:right" onclick="loadA1()">⚡ 检测</button></h4>
+      <div id="a1Body"><p class="hint">点击「检测」扫描所有 OCI 账户的 A1 余量与在跑实例,支持一键降配腾出额度(A1.Flex 降配需先关机)</p></div>
+    </div>
+    <div class="qcard">
       <h4>📊 配额订阅 <button class="btn-ghost" style="float:right" onclick="loadQuota()">⟳ 刷新配额</button></h4>
       <div id="quotaBody"><p class="hint">Oracle Cloud A1 核数 / E2.Micro 配额用量(免费层判定),点「刷新配额」查询</p></div>
     </div>
@@ -348,11 +352,14 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
         <div><label>Bot Token(@BotFather 创建)</label><input id="tg-token" placeholder="1234567890:AAE…"></div>
         <div><label>Chat ID(向机器人发消息后从 getUpdates 获取)</label><input id="tg-chat" placeholder="如 123456789"></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+        <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px;margin:0">
+          <input type="checkbox" id="tg-enable" style="width:auto"> 🤖 启用 Bot 指令控制</label>
         <button onclick="saveTg()">保存配置</button>
         <button class="btn-cyan" onclick="testTg()">📤 发送测试消息</button>
-        <span class="hint" style="align-self:center">配置后:停机拉起、流量超限等事件会推送到你的 Telegram</span>
+        <span id="tg-bot-status" class="hint" style="align-self:center"></span>
       </div>
+      <p class="hint" style="margin-top:6px">启用后可直接在 Telegram 里管理服务器:发送 /help 查看指令(状态查询/开机/关机/重启/换IP结果/A1配额等)。仅响应上方 Chat ID。</p>
     </div>
     <div class="qcard">
       <h4>🔗 备用通用 Webhook(未配置 Telegram 时使用)</h4>
@@ -2563,19 +2570,82 @@ async function changePw() {
 
 /* ================= 守护中心 TG ================= */
 async function loadTg() {
-  try { const d = await api("/api/guardian/tg");
-    $("#tg-token").value = d.bot_token || ""; $("#tg-chat").value = d.chat_id || ""; } catch {}
+  try {
+    const d = await api("/api/guardian/tg");
+    $("#tg-token").value = d.bot_token || ""; $("#tg-chat").value = d.chat_id || "";
+    $("#tg-enable").checked = !!d.enabled;
+    renderBotStatus(d.bot_status);
+  } catch {}
+}
+function renderBotStatus(s) {
+  const el = $("#tg-bot-status");
+  if (!el) return;
+  if (!s) { el.textContent = ""; return; }
+  const on = s.enabled && s.running;
+  el.innerHTML = on ? '<span class="badge b-run">🤖 Bot 运行中</span>'
+    : s.enabled ? '<span class="badge b-busy">等待线程就绪…</span>'
+    : '<span class="badge b-stop">Bot 未启用</span>';
 }
 async function saveTg() {
   try {
     await api("/api/guardian/tg", { method: "POST", body: JSON.stringify({
-      bot_token: $("#tg-token").value.trim(), chat_id: $("#tg-chat").value.trim() }) });
-    toast("TG 配置已保存", "ok");
+      bot_token: $("#tg-token").value.trim(), chat_id: $("#tg-chat").value.trim(),
+      enabled: $("#tg-enable").checked }) });
+    toast("TG 配置已保存" + ($("#tg-enable").checked ? ",Bot 已启用(发 /help 试试)" : ""), "ok");
+    setTimeout(async () => { try { renderBotStatus(await api("/api/guardian/tg/bot-status")); } catch {} }, 1500);
   } catch (e) { toast(e.message, "err"); }
 }
 async function testTg() {
   try { await api("/api/guardian/tg-test", { method: "POST" }); toast("📤 测试消息已发送,请在 Telegram 查看", "ok"); }
   catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= A1 配额体检 ================= */
+async function loadA1() {
+  const box = $("#a1Body");
+  box.innerHTML = '<p class="hint">🩺 正在体检(扫描各账户配额与 A1 实例)…</p>';
+  try {
+    const d = await api("/api/a1-check");
+    box.innerHTML = (d.items || []).map(a => {
+      if (!a.ok) return `<div class="qcard"><b>${esc(a.name)}</b> <span class="badge b-err">查询失败</span><p class="hint">${esc(a.error || "")}</p></div>`;
+      const pm = a.payment_model === "FREE_TIER" ? '<span class="badge b-run">免费层</span>'
+               : a.payment_model === "PAYG" ? '<span class="badge b-info">PAYG</span>' : "";
+      const adRows = (a.ads || []).map(x => {
+        const c = x.core_avail ?? "-", m = x.mem_avail ?? "-";
+        const tight = (typeof x.core_avail === "number" && x.core_avail <= 0);
+        return `<tr><td>${esc(x.ad)}</td>
+          <td><b style="color:${tight ? "var(--red)" : "var(--green)"}">${c}</b> 核 / <b>${m}</b> GB 可用
+              <span class="hint">(已用 ${x.core_used ?? "-"} 核 / ${x.mem_used ?? "-"} GB)</span></td></tr>`;
+      }).join("") || `<tr><td colspan="2" class="hint">未取到限额数据</td></tr>`;
+      const ins = (a.instances || []).map(i => `<tr>
+          <td><b>${esc(i.name)}</b></td>
+          <td>${badge(i.state)}</td>
+          <td>${i.ocpus ?? "-"}C/${i.mem_gbs ?? "-"}G @${esc(i.ad || "-")}</td>
+          <td>${i.public_ip ? esc(i.public_ip) : "-"}</td>
+          <td><div class="ops">
+            <button class="btn-ghost" onclick="a1Resize(${a.account_id},'${esc(i.id)}',${i.name ? `'${esc(i.name)}'` : "''"},1,6)">降至1C/6G</button>
+            <button class="btn-ghost" onclick="a1Resize(${a.account_id},'${esc(i.id)}','${esc(i.name)}',2,12)">降至2C/12G</button>
+          </div></td></tr>`).join("")
+        : `<tr><td colspan="5" class="empty">该账户暂无 A1.Flex 实例</td></tr>`;
+      return `<div style="margin-bottom:14px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <b>${esc(a.name)}</b> <span class="badge b-info">${esc(a.region)}</span> ${pm}
+        </div>
+        <div class="tblwrap mini-tbl"><table style="min-width:0"><thead><tr><th>可用域</th><th>A1 余量</th></tr></thead><tbody>${adRows}</tbody></table></div>
+        <div class="tblwrap mini-tbl" style="margin-top:8px"><table style="min-width:0"><thead><tr><th>A1 实例</th><th>状态</th><th>规格</th><th>公网IP</th><th>降配(需先关机)</th></tr></thead><tbody>${ins}</tbody></table></div>
+      </div>`;
+    }).join("") || '<p class="empty">没有 OCI 账户</p>';
+  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--red)">检测失败:${esc(e.message)}</p>`; }
+}
+async function a1Resize(accountId, instanceId, name, ocpus, mem) {
+  if (!confirm(`确定把「${name}」降到 ${ocpus}核/${mem}GB?
+注意:A1.Flex 修改规格需实例处于停止状态;运行中的实例会被 OCI 拒绝。`)) return;
+  try {
+    await api("/api/instances/resize", { method: "POST", body: JSON.stringify({
+      account_id: accountId, instance_id: instanceId, ocpus, mem_gbs: mem }) });
+    toast(`✅ ${name} 已提交降配为 ${ocpus}C/${mem}G`, "ok");
+    setTimeout(loadA1, 1500);
+  } catch (e) { toast(e.message, "err"); }
 }
 
 /* ================= OCI 监控一键开启 ================= */

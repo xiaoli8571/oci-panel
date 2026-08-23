@@ -185,3 +185,67 @@ def boot_volume_update(body: VolumeUpdateReq):
 @router.get("/quota")
 def quota(account_id: int):
     return oci_client.account_quota(_get_account(account_id))
+
+
+# ---------------------------------------------------------------- A1 配额体检
+
+_A1_CACHE: TTLCache = TTLCache(ttl=60.0, max_items=8)
+
+
+@router.get("/a1-check")
+def a1_check():
+    """全部 OCI 账户的 A1 体检:各 AD 余量 + 在跑的 A1.Flex 实例(60s 缓存)。
+
+    供前端一键降配(降配需实例先关机,由前端提示)。"""
+    import concurrent.futures as cf
+
+    from ..pcreds import provider_of
+    from ..database import db as _db
+
+    cached = _A1_CACHE.get("all")
+    if cached is not None:
+        return cached
+
+    with _db() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM accounts").fetchall()]
+    ocis = [r for r in rows if provider_of(r) == "oci"]
+
+    def one(acct: dict) -> dict:
+        base = {"account_id": acct["id"], "name": acct["name"], "region": acct["region"]}
+        try:
+            q = oci_client.account_quota(acct)
+            core = next((l for l in q["limits"] if l["name"] == "standard-a1-core-count"), None)
+            mem = next((l for l in q["limits"] if l["name"] == "standard-a1-memory-count"), None)
+            ads: dict = {}
+            for it in (core or {}).get("items", []):
+                ads.setdefault(it["ad"], {})["core_avail"] = it["available"]
+                ads.setdefault(it["ad"], {})["core_used"] = it["used"]
+            for it in (mem or {}).get("items", []):
+                ads.setdefault(it["ad"], {})["mem_avail"] = it["available"]
+                ads.setdefault(it["ad"], {})["mem_used"] = it["used"]
+            try:
+                ins = oci_client.list_instances(acct)
+            except Exception:  # noqa: BLE001
+                ins = []
+            a1 = [{"id": i["id"], "compartment_id": i["compartment_id"],
+                   "name": i["name"], "state": i["state"],
+                   "ocpus": i.get("ocpus"), "mem_gbs": i.get("mem_gbs"),
+                   "ad": i.get("ad"), "public_ip": i.get("public_ip")}
+                  for i in ins if (i.get("shape") or "").startswith("VM.Standard.A1.Flex")]
+            return {**base, "ok": True,
+                    "payment_model": q.get("payment_model"),
+                    "ads": [{"ad": k, **v} for k, v in sorted(ads.items())],
+                    "instances": a1}
+        except Exception as e:  # noqa: BLE001
+            return {**base, "ok": False, "error": str(e)[:200]}
+
+    if len(ocis) == 1:
+        results = [one(ocis[0])]
+    elif ocis:
+        with cf.ThreadPoolExecutor(max_workers=min(config.MAX_WORKERS, len(ocis))) as ex:
+            results = list(ex.map(one, ocis))
+    else:
+        results = []
+    data = {"items": results}
+    _A1_CACHE.set("all", data)
+    return data

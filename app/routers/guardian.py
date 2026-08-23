@@ -1,7 +1,7 @@
 """守护中心接口:规则 / 事件 / 通知设置 / 域名监控 / 手动巡检。"""
 from fastapi import APIRouter, HTTPException
 
-from .. import database, domain_monitor, guardian, jobs
+from .. import database, domain_monitor, guardian, jobs, tgbot
 from ..pcreds import ProviderError
 from ..schemas import GuardianRule, TgReq, WebhookReq
 
@@ -52,13 +52,20 @@ def webhook_set(body: WebhookReq):
 @router.get("/tg")
 def tg_get():
     token, chat = guardian.get_tg()
-    return {"bot_token": token, "chat_id": chat}
+    return {"bot_token": token, "chat_id": chat,
+            "enabled": guardian.tg_enabled(), "bot_status": tgbot.status()}
 
 
 @router.post("/tg")
 def tg_set(body: TgReq):
     guardian.set_tg(body.bot_token, body.chat_id)
+    guardian.set_tg_enabled(body.enabled)
     return {"ok": True}
+
+
+@router.get("/tg/bot-status")
+def tg_bot_status():
+    return tgbot.status()
 
 
 @router.post("/tg-test")

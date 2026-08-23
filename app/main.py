@@ -7,7 +7,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import config, database, guardian, security
+from . import config, database, guardian, security, tgbot
 from .oci_client import OciError
 from .pcreds import ProviderError
 from .routers import wssh as wssh_router
@@ -24,6 +24,7 @@ log = logging.getLogger("panel")
 generated_pw = security.init()
 database.init()
 guardian.start()
+tgbot.start()   # Telegram Bot 指令控制(未启用时静默待机)
 
 if generated_pw:
     bar = "=" * 52
