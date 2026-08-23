@@ -310,6 +310,18 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
     </table></div>
     <p class="hint" id="dnsHint"></p>
 
+    <!-- ---- OCI 对象存储 ---- -->
+    <div class="qcard" style="margin-top:14px">
+      <h4>🗄 OCI 对象存储
+        <span style="float:right;display:flex;gap:8px;align-items:center">
+          <select id="oss-acct" onchange="loadBuckets()" style="width:auto;padding:4px 8px"></select>
+          <button class="btn-ghost" onclick="loadBuckets(true)">⟳ 刷新</button>
+          <button onclick="createBucket()">＋ 新建桶</button>
+        </span>
+      </h4>
+      <div id="ossBody"><p class="hint">选择账户列出对象存储桶;点击桶名浏览/上传/下载/删除文件(单文件 ≤50MB)</p></div>
+    </div>
+
     <!-- ---- Cloudflare Workers ---- -->
     <div class="qcard" style="margin-top:14px">
       <h4>⚡ Cloudflare Workers
@@ -897,6 +909,7 @@ function showTab(t) {
   TABS.forEach(x => { const el = $("#tab-" + x); if (el) el.hidden = x !== t;
     const b = $("#nav-" + x); b && b.classList.toggle("active", x === t); });
   if (t === "inst" && $("#quotaBody").querySelector(".hint")) loadQuota();
+  if (t === "cloud") { ossAccounts(); }
   if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); loadDomains(); }
   if (t === "cloud") initCloudTab();
 }
@@ -1571,6 +1584,7 @@ async function loadAccounts() {
   const d = await api("/api/accounts");
   acctItems = d.items || [];
   $("#acctCount").textContent = acctItems.length;
+  if (typeof ossAccounts === "function") ossAccounts();
   $("#acctBody").innerHTML = acctItems.length ? acctItems.map(a => `<tr>
       <td><b>${esc(a.name)}</b></td><td>${esc(a.region)}</td>
       <td><span class="ip" onclick="copyText('${esc(a.tenancy_ocid)}')" style="font-size:12px">${esc(a.tenancy_ocid.slice(0, 28))}…</span></td>
@@ -2392,6 +2406,110 @@ async function delRecord(recordId) {
   } catch (e) { toast(e.message, "err"); }
 }
 
+/* ---- OCI 对象存储 ---- */
+let ossBucket = "";
+function ossAccounts() {
+  const sel = $("#oss-acct");
+  if (!sel) return;
+  const ocis = acctItems.filter(a => (a.provider || "oci") === "oci");
+  const cur = sel.value;
+  sel.innerHTML = ocis.length
+    ? ocis.map(a => `<option value="${a.id}">${esc(a.name)}·${esc(a.region)}</option>`).join("")
+    : `<option value="">(无 OCI 账户)</option>`;
+  if (cur) sel.value = cur;
+}
+async function loadBuckets(force) {
+  const sel = $("#oss-acct"), box = $("#ossBody");
+  if (!sel || !sel.value) { box.innerHTML = '<p class="empty">先在「账户设置」添加 OCI 账户</p>'; return; }
+  if (force) box.innerHTML = '<p class="hint">加载中…</p>';
+  try {
+    const d = await api(`/api/oss/buckets?account_id=${sel.value}` + (force ? "?_=" + Date.now() : ""));
+    const items = d.items || [];
+    box.innerHTML = items.length ? `<table style="min-width:0"><thead><tr>
+        <th>桶名</th><th>层级</th><th>创建时间</th><th>操作</th></tr></thead><tbody>` +
+      items.map(b => `<tr>
+        <td><a href="javascript:void(0)" onclick="openBucket('${esc(b.name)}')" style="font-weight:600">${esc(b.name)}</a></td>
+        <td>${esc(b.storage_tier || "Standard")}</td><td>${esc(b.created || "-")}</td>
+        <td><button class="btn-ghost" onclick="openBucket('${esc(b.name)}')">浏览</button>
+            <button class="btn-red" onclick="delBucket('${esc(b.name)}')">删除</button></td></tr>`).join("") +
+      `</tbody></table>` : `<p class="empty">该账户暂无桶,点右上「＋ 新建桶」</p>`;
+  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--red)">${esc(e.message)}</p>`; }
+}
+async function createBucket() {
+  const sel = $("#oss-acct");
+  if (!sel || !sel.value) return toast("请先添加 OCI 账户", "err");
+  const name = prompt("新桶名(小写字母/数字/._-,如 my-backup):");
+  if (!name) return;
+  try {
+    await api("/api/oss/bucket", { method: "POST", body: JSON.stringify({ account_id: +sel.value, name: name.trim() }) });
+    toast("✅ 桶已创建", "ok"); loadBuckets(true);
+  } catch (e) { toast(e.message, "err"); }
+}
+async function delBucket(name) {
+  if (!confirm(`删除桶「${name}」?(需为空桶,否则 OCI 会拒绝)`)) return;
+  try {
+    await api(`/api/oss/bucket?account_id=${$("#oss-acct").value}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
+    toast("已删除", "ok"); loadBuckets(true);
+  } catch (e) { toast(e.message, "err"); }
+}
+async function openBucket(name, prefix) {
+  ossBucket = name;
+  const box = $("#ossBody");
+  box.innerHTML = '<p class="hint">加载对象列表…</p>';
+  try {
+    const d = await api(`/api/oss/objects?account_id=${$("#oss-acct").value}&bucket=${encodeURIComponent(name)}&prefix=${encodeURIComponent(prefix || "")}`);
+    const objs = d.objects || [], pres = d.prefixes || [];
+    const up = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <b>📦 ${esc(name)}</b>
+      <button class="btn-ghost btn-sm" onclick="openBucket('${esc(name)}')">⟳ 刷新</button>
+      <label class="btn-ghost btn-sm" style="cursor:pointer;margin:0">⬆ 上传文件
+        <input type="file" style="display:none" onchange="ossUpload(this.files[0])"></label>
+      ${prefix ? `<button class="btn-ghost btn-sm" onclick="openBucket('${esc(name)}','')">⬆ 返回根目录</button>` : ""}
+      <span class="hint">${objs.length} 个对象</span></div>`;
+    const rows = pres.map(p => `<tr><td colspan="4">📁 <a href="javascript:void(0)" onclick="openBucket('${esc(name)}','${esc(p)}')">${esc(p)}</a></td></tr>`)
+      .concat(objs.map(o => {
+        const kb = o.size > 1048576 ? (o.size/1048576).toFixed(1)+"MB" : (o.size/1024).toFixed(1)+"KB";
+        const dl = `/api/oss/object/download?account_id=${$("#oss-acct").value}&bucket=${encodeURIComponent(name)}&name=${encodeURIComponent(o.name)}`;
+        return `<tr>
+          <td class="ip" onclick="copyText('${esc(o.name)}')">${esc(o.name)}</td>
+          <td>${kb}</td><td>${esc(o.modified || "-")}</td>
+          <td><div class="ops">
+            <a href="${dl}"><button class="btn-ghost">⬇ 下载</button></a>
+            <button class="btn-red" onclick="delObject('${esc(name)}','${esc(o.name)}')">删除</button>
+          </div></td></tr>`;
+      }));
+    box.innerHTML = up + (rows.length
+      ? `<table style="min-width:0"><thead><tr><th>对象名</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead><tbody>${rows.join("")}</tbody></table>`
+      : `<p class="empty">空桶</p>`);
+  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--red)">${esc(e.message)}</p>`; }
+}
+async function delObject(bucket, name) {
+  if (!confirm(`删除对象「${name}」?`)) return;
+  try {
+    await api(`/api/oss/object?account_id=${$("#oss-acct").value}&bucket=${encodeURIComponent(bucket)}&name=${encodeURIComponent(name)}`, { method: "DELETE" });
+    toast("已删除", "ok"); openBucket(bucket);
+  } catch (e) { toast(e.message, "err"); }
+}
+async function ossUpload(file) {
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) return toast("超过 50MB 上限", "err");
+  const box = $("#ossBody");
+  const tip = document.createElement("p");
+  tip.className = "hint"; tip.textContent = `⬆ 正在上传 ${file.name}(${(file.size/1024).toFixed(0)}KB)…`;
+  box.prepend(tip);
+  try {
+    const b64 = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(",")[1]);
+      fr.onerror = rej;
+      fr.readAsDataURL(file);
+    });
+    await api("/api/oss/object/upload", { method: "POST", body: JSON.stringify({
+      account_id: +$("#oss-acct").value, bucket: ossBucket, name: file.name, content_b64: b64 }) });
+    toast(`✅ ${file.name} 上传成功`, "ok"); openBucket(ossBucket);
+  } catch (e) { toast("上传失败:" + e.message, "err"); tip.remove(); }
+}
+
 /* ---- Cloudflare Workers ---- */
 let cfAcctId = null;
 async function loadWorkers() {
@@ -2613,9 +2731,11 @@ async function loadA1() {
       const adRows = (a.ads || []).map(x => {
         const c = x.core_avail ?? "-", m = x.mem_avail ?? "-";
         const tight = (typeof x.core_avail === "number" && x.core_avail <= 0);
+        const can2c = x.can_a1_2c12g ?? "-", canE2 = x.can_e2_micro ?? "-";
         return `<tr><td>${esc(x.ad)}</td>
           <td><b style="color:${tight ? "var(--red)" : "var(--green)"}">${c}</b> 核 / <b>${m}</b> GB 可用
-              <span class="hint">(已用 ${x.core_used ?? "-"} 核 / ${x.mem_used ?? "-"} GB)</span></td></tr>`;
+              <span class="hint">(已用 ${x.core_used ?? "-"} 核 / ${x.mem_used ?? "-"} GB)</span>
+              · 还能开 <b style="color:var(--cyan)">${can2c}</b> 台 A1(2C/12G)、<b style="color:var(--purple)">${canE2}</b> 台 E2.Micro</td></tr>`;
       }).join("") || `<tr><td colspan="2" class="hint">未取到限额数据</td></tr>`;
       const ins = (a.instances || []).map(i => `<tr>
           <td><b>${esc(i.name)}</b></td>

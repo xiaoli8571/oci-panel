@@ -220,3 +220,18 @@ class VpsHostIn(BaseModel):
     secret: str = ""                              # 密码或 PEM 私钥;编辑时留空表示不修改
     region: str = Field(default="", max_length=64)
     note: str = Field(default="", max_length=200)
+
+
+# ---------- OCI 对象存储 ----------
+
+class OssBucketIn(BaseModel):
+    account_id: int
+    name: str = Field(min_length=3, max_length=63)   # 小写字母/数字/._-
+    tier: str = Field(default="Standard")             # Standard / Archive
+
+
+class OssObjectIn(BaseModel):
+    account_id: int
+    bucket: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=1024)
+    content_b64: str = ""                             # 上传内容(base64);≤50MB

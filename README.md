@@ -4,6 +4,14 @@
 
 ## 🚦 更新日志
 
+### v0.13.0(对象存储 + 可开机器数检测)
+
+- 🗄 **OCI 对象存储管理**:云与域名页新增卡片
+  - 桶:列出/新建(Standard/Archive)/删除;30s 缓存
+  - 对象:浏览(前缀目录式导航)、上传(FileReader base64 中转,≤50MB)、浏览器直链下载、删除
+- 🔢 **可开机器数检测**:A1 体检升级,每个 AD 直接给出「还能开 N 台 A1(2C/12G)、M 台 E2.Micro」,
+  抢机前先看余量
+
 ### v0.12.0(Telegram Bot 控制 + A1 配额体检)
 
 - 🤖 **Telegram Bot 指令控制**(对标 R探长 核心能力):在守护中心启用后,直接在 TG 里管理服务器
@@ -166,7 +174,6 @@ docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
 
 - [x] Telegram Bot 指令控制(状态/开关机/重启/配额/域名监控)
 - [x] A1 配额体检 + 一键降配(抢占式开机重试创建时已有)
-- [ ] OCI 对象存储(Object Storage)管理
 - [ ] 串行控制台连接
 - [ ] 服务限额(Limits)一键检测可开机器数
 - [ ] 多用户与操作审计日志

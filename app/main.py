@@ -14,6 +14,7 @@ from .routers import wssh as wssh_router
 from .routers import multi as multi_router
 from .routers import accounts, auth, instances, resources, vps
 from .routers import guardian as guardian_router
+from .routers import oss as oss_router
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
@@ -43,6 +44,7 @@ app.include_router(vps.router)
 app.include_router(guardian_router.router)
 app.include_router(wssh_router.router)
 app.include_router(multi_router.router)
+app.include_router(oss_router.router)
 
 
 # ---- 登录守卫:保护所有 /api/*(除 login/status)与 /healthz ----

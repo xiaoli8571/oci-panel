@@ -7,6 +7,7 @@ import re
 from fastapi import APIRouter, HTTPException, Query
 
 from .. import config, jobs, oci_client
+from ..oci_client import _ad_short
 from ..database import db
 from ..schemas import (CreateInstanceReq, NetRef, PortsReq, RenameReq,
                        ReservedIpOp, ResizeReq, TerminateReq, VolumeUpdateReq)
@@ -216,6 +217,7 @@ def a1_check():
             q = oci_client.account_quota(acct)
             core = next((l for l in q["limits"] if l["name"] == "standard-a1-core-count"), None)
             mem = next((l for l in q["limits"] if l["name"] == "standard-a1-memory-count"), None)
+            e2m = next((l for l in q["limits"] if l["name"] == "standard-e2-micro-count"), None)
             ads: dict = {}
             for it in (core or {}).get("items", []):
                 ads.setdefault(it["ad"], {})["core_avail"] = it["available"]
@@ -223,6 +225,18 @@ def a1_check():
             for it in (mem or {}).get("items", []):
                 ads.setdefault(it["ad"], {})["mem_avail"] = it["available"]
                 ads.setdefault(it["ad"], {})["mem_used"] = it["used"]
+            e2m_map = {it["ad"]: it for it in (e2m or {}).get("items", [])}
+            # 换算每个 AD 还能开几台(向下取整;免费额度按 4核24G 判断)
+            ad_out = []
+            for k, v in sorted(ads.items()):
+                ca, ma = int(v.get("core_avail") or 0), int(v.get("mem_avail") or 0)
+                fit_2c12 = min(ca // 2, ma // 12)
+                fit_1c6 = min(ca, ma // 6)
+                em = e2m_map.get(k) or {}
+                ad_out.append({**v, "ad": _ad_short(k),
+                               "can_a1_2c12g": max(fit_2c12, 0),
+                               "can_a1_1c6g": max(fit_1c6, 0),
+                               "can_e2_micro": em.get("available")})
             try:
                 ins = oci_client.list_instances(acct)
             except Exception:  # noqa: BLE001
@@ -234,7 +248,7 @@ def a1_check():
                   for i in ins if (i.get("shape") or "").startswith("VM.Standard.A1.Flex")]
             return {**base, "ok": True,
                     "payment_model": q.get("payment_model"),
-                    "ads": [{"ad": k, **v} for k, v in sorted(ads.items())],
+                    "ads": ad_out,
                     "instances": a1}
         except Exception as e:  # noqa: BLE001
             return {**base, "ok": False, "error": str(e)[:200]}

@@ -806,3 +806,128 @@ def _traffic_impl(acct: dict, compartment_id: str, hours: int) -> dict:
     points = [series[k] for k in sorted(series)]
     return {"hours": hours, "window": window, "points": points,
             "total_down_bytes": totals["down"], "total_up_bytes": totals["up"]}
+
+
+# ================================================================ 对象存储(Object Storage)
+
+MAX_OSS_OBJECT = 50 * 1024 * 1024   # 单对象经面板中转的上限(与 SFTP 一致)
+
+
+def _os_client(acct: dict):
+    oci = _sdk()
+    return _client(oci, oci.object_storage.ObjectStorageClient, build_config(acct)), oci
+
+
+def get_namespace(acct: dict) -> str:
+    try:
+        cli, _ = _os_client(acct)
+        ns = cli.get_namespace().data
+        return ns if isinstance(ns, str) else getattr(ns, "value", str(ns))
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def list_buckets(acct: dict, compartment_id: str | None = None) -> list[dict]:
+    """列出区间内全部对象存储桶。compartment_id 缺省用租户根。"""
+    try:
+        cli, _ = _os_client(acct)
+        ns = get_namespace(acct)
+        comp = compartment_id or acct["tenancy_ocid"]
+        out = []
+        for b in oci_pagination(cli.list_buckets, ns, compartment_id=comp).data:
+            out.append({
+                "name": b.name,
+                "namespace": ns,
+                "compartment_id": b.compartment_id,
+                "created": (b.time_created.strftime("%Y-%m-%d") if b.time_created else ""),
+                "storage_tier": getattr(b, "storage_tier", "") or "",
+                "freeform_tags": getattr(b, "freeform_tags", None) or {},
+            })
+        return out
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def create_bucket(acct: dict, name: str, compartment_id: str | None = None,
+                  tier: str = "Standard") -> dict:
+    try:
+        oci = _sdk()
+        cli, _ = _os_client(acct)
+        ns = get_namespace(acct)
+        b = cli.create_bucket(
+            ns, oci.object_storage.models.CreateBucketDetails(
+                name=name, compartment_id=compartment_id or acct["tenancy_ocid"],
+                public_access_type="NoPublicAccess", storage_tier=tier)).data
+        return {"name": b.name}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def delete_bucket(acct: dict, bucket: str) -> dict:
+    try:
+        cli, _ = _os_client(acct)
+        cli.delete_bucket(get_namespace(acct), bucket)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def list_objects(acct: dict, bucket: str, prefix: str = "", limit: int = 300) -> dict:
+    try:
+        cli, _ = _os_client(acct)
+        ns = get_namespace(acct)
+        res = cli.list_objects(ns, bucket, prefix=prefix or None,
+                               fields="name,size,timeCreated", limit=min(max(limit, 1), 1000)).data
+        objs = [{
+            "name": o.name,
+            "size": getattr(o, "size", None) or 0,
+            "modified": (o.time_created.strftime("%Y-%m-%d %H:%M")
+                         if getattr(o, "time_created", None) else ""),
+        } for o in (res.objects or [])]
+        return {"objects": objs, "prefixes": list(res.prefixes or []),
+                "next_start_with": getattr(res, "next_start_with", None)}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def get_object_content(acct: dict, bucket: str, name: str) -> bytes:
+    """读取对象内容(上限 MAX_OSS_OBJECT;供下载接口流式回传)。"""
+    try:
+        cli, _ = _os_client(acct)
+        head = cli.head_object(get_namespace(acct), bucket, name)
+        size = int(head.headers.get("content-length", 0))
+        if size > MAX_OSS_OBJECT:
+            raise OciError(f"文件超过 {MAX_OSS_OBJECT // 1024 // 1024}MB 上限,请用 oci 命令行下载")
+        resp = cli.get_object(get_namespace(acct), bucket, name)
+        return resp.data.content
+    except OciError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def put_object_content(acct: dict, bucket: str, name: str, content: bytes) -> dict:
+    if len(content) > MAX_OSS_OBJECT:
+        raise OciError(f"超过 {MAX_OSS_OBJECT // 1024 // 1024}MB 上限")
+    try:
+        cli, _ = _os_client(acct)
+        cli.put_object(get_namespace(acct), bucket, put_object_body=content,
+                       object_name=name, content_length=len(content))
+        return {"ok": True, "size": len(content)}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def delete_object(acct: dict, bucket: str, name: str) -> dict:
+    try:
+        cli, _ = _os_client(acct)
+        cli.delete_object(get_namespace(acct), bucket, name)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        raise _wrap(e) from e
+
+
+def oci_pagination(fn, *args, **kw):
+    """oci.pagination.list_call_get_all_results 的本地包装(避免模块顶部 import oci)。"""
+    oci = _sdk()
+    return oci.pagination.list_call_get_all_results(fn, *args, **kw)
