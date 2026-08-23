@@ -158,6 +158,8 @@ def _cmd_help() -> str:
         "/on <名称|IP|序号> — 开机\n"
         "/off <名称|IP|序号> — 关机\n"
         "/reboot <名称|IP|序号> — 重启\n"
+        "/reip <名称|IP|序号> — 更换公网 IP(1~3 分钟)\n"
+        "/open <名称|序号> <端口> — 开放 TCP 端口\n"
         "/quota — A1 配额余量\n"
         "/dom — 域名/SSL 到期监控\n"
         "/guard — 守护规则状态\n"
@@ -225,6 +227,64 @@ def _make_power_cmd(op_key: str, label: str):
             return f"⚠ 失败:{e}"
         return msg + "(可用 /ip " + m[0]["name"] + " 查看结果)"
     return _run
+
+
+def _run_reip(chat_id: str, arg: str) -> str:
+    """换公网 IP:同步执行,期间发进度消息(约 1~3 分钟)。"""
+    if not arg:
+        return "用法:/reip <名称|IP|序号>"
+    rows = _snapshot()
+    m, err = _resolve(rows, chat_id, arg)
+    if err or not m:
+        return err or "未找到实例"
+    r = m[0]
+    if r.get("provider") != "oci":
+        return "⚠ 换 IP 目前仅支持 OCI 实例"
+    from .database import db
+    with db() as c:
+        acct_row = c.execute("SELECT * FROM accounts WHERE id=?", (r["account_id"],)).fetchone()
+    if not acct_row:
+        return "⚠ 账户不存在"
+    _reply(chat_id, f"⏳ 开始更换「{r['name']}」的公网 IP,预计 1~3 分钟…")
+    try:
+        res = oci_client.change_public_ip(lambda msg: None,
+                                          dict(acct_row), r["compartment_id"], r["id"])
+        new_ip = res.get("new_ip") or "(未获取到)"
+        with _snap_lock:
+            _snap["ts"] = 0
+        return f"✅ {r['name']} 换 IP 完成:\n旧:{res.get('old_ip') or '无'} → 新:{new_ip}"
+    except Exception as e:  # noqa: BLE001
+        return f"⚠ 换 IP 失败:{e}"
+
+
+def _run_open(chat_id: str, arg: str) -> str:
+    """开放 TCP 端口:/open <名称|序号> <端口>。"""
+    parts = arg.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        return "用法:/open <名称|序号> <端口>(如 /open web-prod 8080)"
+    name_q, port = parts[0], int(parts[1])
+    if not (1 <= port <= 65535):
+        return "⚠ 端口范围 1-65535"
+    rows = _snapshot()
+    m, err = _resolve(rows, chat_id, name_q)
+    if err or not m:
+        return err or "未找到实例"
+    r = m[0]
+    if r.get("provider") != "oci":
+        return "⚠ 开端口目前仅支持 OCI 实例"
+    try:
+        from .database import db
+        with db() as c:
+            acct_row = c.execute("SELECT * FROM accounts WHERE id=?", (r["account_id"],)).fetchone()
+        res = oci_client.open_ports(dict(acct_row), r["compartment_id"], r["id"], [port])
+        added, skipped = res.get("added") or [], res.get("skipped") or []
+        if added:
+            return f"✅ 「{r['name']}」已放行 TCP/{port}(v4+v6 全网段)"
+        if skipped:
+            return f"ℹ TCP/{port} 此前已放行,无需重复操作"
+        return f"完成:{added} 放行,{skipped} 已存在"
+    except Exception as e:  # noqa: BLE001
+        return f"⚠ 开端口失败:{e}"
 
 
 def _cmd_quota() -> str:
@@ -296,6 +356,8 @@ _CMDS = {
     "/off": _make_power_cmd("off", "软关机"),
     "/down": _make_power_cmd("off", "软关机"),
     "/reboot": _make_power_cmd("reboot", "重启"),
+    "/reip": lambda cid, arg: _run_reip(cid, arg),
+    "/open": lambda cid, arg: _run_open(cid, arg),
     "/quota": lambda cid, arg: _cmd_quota(),
     "/dom": lambda cid, arg: _cmd_dom(),
     "/guard": lambda cid, arg: _cmd_guard(),

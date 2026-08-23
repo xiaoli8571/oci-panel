@@ -82,7 +82,23 @@ def logout(response: Response):
 
 @router.get("/status")
 def status():
-    return {"ok": True, "version": config.VERSION}
+    latest = None
+    try:
+        from .. import main as _m
+        if time.time() - _m._latest_ver["ts"] < 7 * 24 * 3600:
+            latest = _m._latest_ver["v"]
+    except Exception:  # noqa: BLE001
+        pass
+    has_new = bool(latest and latest.lstrip("vV") != config.VERSION)
+    return {"ok": True, "version": config.VERSION, "latest": latest,
+            "has_new": has_new}
+
+
+@router.get("/audit")
+def audit_list(limit: int = 200, q: str = ""):
+    """操作审计日志(最近 N 条,可按路径关键词过滤)。"""
+    from .. import audit
+    return {"items": audit.recent(limit=limit, q=q)}
 
 
 @router.post("/password")

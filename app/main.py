@@ -1,5 +1,6 @@
 """面板入口:装配路由、登录中间件、异常处理、静态页面。"""
 import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -7,7 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import config, database, guardian, security, tgbot
+from . import audit, config, database, guardian, security, tgbot
 from .oci_client import OciError
 from .pcreds import ProviderError
 from .routers import wssh as wssh_router
@@ -24,6 +25,7 @@ log = logging.getLogger("panel")
 # ---- 启动初始化(首次运行会生成随机密码并打印)----
 generated_pw = security.init()
 database.init()
+audit.init()
 guardian.start()
 tgbot.start()   # Telegram Bot 指令控制(未启用时静默待机)
 
@@ -57,7 +59,18 @@ async def guard(request: Request, call_next):
     if path.startswith("/api") and path not in EXEMPT:
         if not security.verify_session(request.cookies.get(security.COOKIE_NAME)):
             return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
-    return await call_next(request)
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    # 操作审计:记录全部 API 写操作与登录尝试
+    try:
+        if request.method in ("POST", "PUT", "DELETE", "PATCH") and path.startswith("/api"):
+            audit.record(request.method, path,
+                         status=getattr(response, "status_code", None),
+                         ms=int((time.perf_counter() - t0) * 1000),
+                         ip=request.client.host if request.client else "")
+    except Exception:  # noqa: BLE001
+        pass
+    return response
 
 
 @app.exception_handler(ProviderError)
@@ -82,6 +95,33 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+_latest_ver = {"v": None, "ts": 0.0}
+
+
+@app.on_event("startup")
+async def _version_checker():
+    import asyncio
+
+    async def _sleep(sec: float):
+        await asyncio.sleep(sec)
+
+    async def _loop():
+        while True:
+            try:
+                v = await asyncio.to_thread(config.latest_release_sync)
+                if v:
+                    _latest_ver["v"], _latest_ver["ts"] = v, time.time()
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(6 * 3600)
+
+    async def _runner():
+        await asyncio.sleep(20.0)
+        await _loop()
+
+    asyncio.create_task(_runner())
 
 
 @app.get("/healthz")

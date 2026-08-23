@@ -12,7 +12,7 @@ CONFIG_PATH = DATA_DIR / "config.json"        # 存放面板密码哈希等
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
-VERSION = "0.13.0"
+VERSION = "0.14.0"
 
 SESSION_TTL = 7 * 24 * 3600   # 登录会话有效期(秒)
 
@@ -29,3 +29,17 @@ COOKIE_SECURE = os.getenv("COOKIE_SECURE", "auto").lower()
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def latest_release_sync(timeout: float = 5.0) -> str | None:
+    """查询 GitHub 最新 release 版本号(失败返回 None;由后台线程定期调用)。"""
+    import requests
+    try:
+        r = requests.get("https://api.github.com/repos/xiaoli8571/oci-panel/releases/latest",
+                         timeout=timeout, headers={"Accept": "application/vnd.github+json"})
+        if r.status_code == 200:
+            tag = (r.json() or {}).get("tag_name") or ""
+            return tag.lstrip("vV") or None
+    except Exception:  # noqa: BLE001
+        pass
+    return None

@@ -255,6 +255,8 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
   </nav>
   <div class="right">
     <button class="btn-ghost" id="themeBtn" onclick="toggleTheme()" title="切换 浅色/深色 主题">☀️</button>
+    <a id="updBadge" href="https://github.com/xiaoli8571/oci-panel" target="_blank" style="display:none">
+      <button class="btn-cyan">⬆ 新版可用</button></a>
     <button class="btn-ghost" onclick="loadAll(true)">⟳ 刷新</button>
     <button class="btn-ghost" onclick="logout()">退出</button>
   </div>
@@ -406,6 +408,15 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
         <div><label>新密码(至少 6 位)</label><input id="pw-new" type="password" autocomplete="new-password"></div>
       </div>
       <div style="margin-top:10px;text-align:right"><button onclick="changePw()">确认修改</button></div>
+    </div>
+    <div class="qcard" style="margin-bottom:14px">
+      <h4>📜 操作审计日志 <button class="btn-ghost btn-sm" style="float:right" onclick="loadAudit()">⟳ 刷新</button></h4>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <input id="audit-q" placeholder="按路径过滤,如 /instances 或 login" style="max-width:280px">
+        <button class="btn-ghost btn-sm" onclick="loadAudit()">查询</button>
+        <span class="hint">记录所有写操作(POST/PUT/DELETE)与耗时;最多保留 5000 条</span>
+      </div>
+      <div id="auditBody"><p class="hint">点「刷新」加载最近 200 条</p></div>
     </div>
     <div class="toolbar">
       <div class="stat">账户数 <b id="acctCount">-</b></div>
@@ -1580,6 +1591,22 @@ async function loadQuota() {
 
 /* ================= 账户 ================= */
 let editAcctId = null;
+async function loadAudit() {
+  const box = $("#auditBody");
+  box.innerHTML = '<p class="hint">加载中…</p>';
+  try {
+    const q = $("#audit-q").value.trim();
+    const d = await api("/api/audit?limit=200&q=" + encodeURIComponent(q));
+    box.innerHTML = d.items.length ? `<table style="min-width:0"><thead><tr>
+        <th>时间</th><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>来源IP</th></tr></thead><tbody>` +
+      d.items.map(r => `<tr>
+        <td>${esc(r.ts)}</td><td><b>${esc(r.method)}</b></td>
+        <td class="ip">${esc(r.path)}</td>
+        <td><span class="badge ${r.status && r.status < 400 ? "b-run" : "b-err"}">${r.status ?? "-"}</span></td>
+        <td>${r.ms != null ? r.ms + "ms" : "-"}</td><td>${esc(r.ip || "-")}</td></tr>`).join("") +
+      `</tbody></table>` : '<p class="empty">暂无记录</p>';
+  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--red)">${esc(e.message)}</p>`; }
+}
 async function loadAccounts() {
   const d = await api("/api/accounts");
   acctItems = d.items || [];
@@ -2785,8 +2812,11 @@ async function loadAll(notify) {
   catch (e) { if (notify && e.message !== "请先登录") toast(e.message, "err"); }
 }
 (async () => {
-  try { await api("/api/status"); $("#loginMask").classList.remove("show"); loadAll(); }
-  catch { showLogin(); }
+  try {
+    const s = await api("/api/status");
+    $("#loginMask").classList.remove("show"); loadAll();
+    if (s.has_new) { const b = $("#updBadge"); if (b) b.style.display = ""; }
+  } catch { showLogin(); }
 })();
 </script>
 </body>
