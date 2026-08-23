@@ -2,12 +2,22 @@
 
 所有公开函数第一个参数为数据库中的账户行(dict);
 需要长时间等待的函数第一个参数为 progress 日志回调(jobs.start_job 注入)。
+
+性能说明(v0.10.0):
+- SDK 客户端按「账户凭据指纹」缓存复用,避免每次请求重复解密私钥/解析 PEM;
+- 实例列表的 VNIC / 启动盘 / 保留IP 判定按线程池并行查询;
+- 配额、流量等多次独立 API 调用并行发出。
 """
 from __future__ import annotations
 
+import concurrent.futures as cf
 import datetime as dt
+import hashlib
 import logging
 import time
+
+from . import config
+from .ttlcache import TTLCache
 
 log = logging.getLogger("oci")
 
@@ -45,9 +55,25 @@ def build_config(acct: dict) -> dict:
     }
 
 
+# ---- SDK 客户端缓存:key = (类名, 凭据摘要)。凭据变更后摘要不同即自动失效。 ----
+_SDK_CLIENTS: TTLCache = TTLCache(ttl=600.0, max_items=64)
+
+
+def _cfg_key(cfg: dict) -> str:
+    raw = "|".join((cfg.get("user") or "", cfg.get("tenancy") or "",
+                    cfg.get("region") or "", cfg.get("fingerprint") or "",
+                    hashlib.sha256((cfg.get("key_content") or "").encode()).hexdigest()[:16]))
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
 def _client(oci, cls, cfg):
-    """统一创建 SDK 客户端:禁用自动重试并设置超时,保证面板响应迅速、失败可见。"""
-    return cls(cfg, retry_strategy=oci.retry.NoneRetryStrategy(), timeout=(10, 60))
+    """统一创建 SDK 客户端(带缓存):禁用自动重试并设置超时,保证面板响应迅速、失败可见。"""
+    key = (cls.__name__, _cfg_key(cfg))
+    cli = _SDK_CLIENTS.get(key)
+    if cli is None:
+        cli = cls(cfg, retry_strategy=oci.retry.NoneRetryStrategy(), timeout=(10, 60))
+        _SDK_CLIENTS.set(key, cli)
+    return cli
 
 
 def _wrap(e: Exception) -> OciError:
@@ -223,89 +249,106 @@ def list_instances(acct: dict) -> list[dict]:
         raise _wrap(e) from e
 
 
+def _enrich_instance(oci, cfg, comp_id: str, comp_name: str, ins, acct: dict) -> dict:
+    """查询单台实例的 VNIC/IP/启动盘详情(供线程池并行调用)。"""
+    region = cfg["region"]
+    sc = ins.shape_config
+    row = {
+        "account_id": acct["id"],
+        "account_name": acct["name"],
+        "region": region,
+        "compartment_id": comp_id,
+        "compartment_name": comp_name,
+        "id": ins.id,
+        "name": ins.display_name,
+        "state": (ins.lifecycle_state or "").upper(),
+        "shape": ins.shape,
+        "ocpus": getattr(sc, "ocpus", None) if sc else None,
+        "mem_gbs": getattr(sc, "memory_in_gbs", None) if sc else None,
+        "boot_gbs": None,
+        "boot_volume_id": None,
+        "ad": _ad_short(ins.availability_domain),
+        "public_ip": None,
+        "public_lifetime": None,
+        "private_ip": None,
+        "vnic_id": None,
+        "time_created": (ins.time_created.strftime("%Y-%m-%d %H:%M") if ins.time_created else ""),
+    }
+
+    compute = _client(oci, oci.core.ComputeClient, cfg)
+    net = _client(oci, oci.core.VirtualNetworkClient, cfg)
+
+    # 主 VNIC 与公网 IP(区分临时/保留)
+    try:
+        for att in oci.pagination.list_call_get_all_results(
+            compute.list_vnic_attachments, comp_id, instance_id=ins.id
+        ).data:
+            if att.lifecycle_state != "ATTACHED":
+                continue
+            v = net.get_vnic(att.vnic_id).data
+            if getattr(v, "is_primary", False):
+                row["public_ip"] = v.public_ip
+                row["private_ip"] = v.private_ip
+                row["vnic_id"] = v.id
+                if v.public_ip:
+                    try:
+                        pub = net.get_public_ip_by_ip_address(
+                            oci.core.models.GetPublicIpByIpAddressDetails(ip_address=v.public_ip)
+                        ).data
+                        row["public_lifetime"] = pub.lifetime if pub else None
+                    except Exception:  # noqa: BLE001
+                        pass
+                break
+    except Exception as e:  # noqa: BLE001
+        log.warning("查询实例 %s VNIC 失败:%s", ins.display_name, e)
+
+    # 启动盘
+    try:
+        boots = compute.list_boot_volume_attachments(
+            compartment_id=comp_id,
+            availability_domain=ins.availability_domain,
+            instance_id=ins.id,
+        ).data
+        if boots:
+            bs = _client(oci, oci.core.BlockstorageClient, cfg)
+            bv = bs.get_boot_volume(boots[0].boot_volume_id).data
+            row["boot_gbs"] = bv.size_in_gbs
+            row["boot_volume_id"] = bv.id
+    except Exception as e:  # noqa: BLE001
+        log.debug("查询实例 %s 启动盘失败:%s", ins.display_name, e)
+
+    return row
+
+
 def _list_instances_impl(acct: dict) -> list[dict]:
     oci = _sdk()
     cfg = build_config(acct)
     identity = _client(oci, oci.identity.IdentityClient, cfg)
-    compute = _client(oci, oci.core.ComputeClient, cfg)
-    net = _client(oci, oci.core.VirtualNetworkClient, cfg)
 
-    rows: list[dict] = []
-    for comp_id, comp_name in _iter_compartments(identity, cfg["tenancy"]):
+    # 1) 并行列举各区间中的实例
+    comps = _iter_compartments(identity, cfg["tenancy"])
+
+    def _list_comp(comp: tuple[str, str]):
+        comp_id, comp_name = comp
         try:
             instances = oci.pagination.list_call_get_all_results(
-                compute.list_instances, comp_id
+                _client(oci, oci.core.ComputeClient, cfg).list_instances, comp_id
             ).data
+            return [(comp_id, comp_name, i) for i in instances
+                    if (i.lifecycle_state or "").upper() != "TERMINATED"]
         except Exception as e:  # noqa: BLE001
             log.warning("列举区间 %s 失败:%s", comp_name, e)
-            continue
+            return []
 
-        for ins in instances:
-            if (ins.lifecycle_state or "").upper() == "TERMINATED":
-                continue
-            sc = ins.shape_config
-            row = {
-                "account_id": acct["id"],
-                "account_name": acct["name"],
-                "region": cfg["region"],
-                "compartment_id": comp_id,
-                "compartment_name": comp_name,
-                "id": ins.id,
-                "name": ins.display_name,
-                "state": (ins.lifecycle_state or "").upper(),
-                "shape": ins.shape,
-                "ocpus": getattr(sc, "ocpus", None) if sc else None,
-                "mem_gbs": getattr(sc, "memory_in_gbs", None) if sc else None,
-                "boot_gbs": None,
-                "boot_volume_id": None,
-                "ad": _ad_short(ins.availability_domain),
-                "public_ip": None,
-                "public_lifetime": None,
-                "private_ip": None,
-                "vnic_id": None,
-                "time_created": (ins.time_created.strftime("%Y-%m-%d %H:%M") if ins.time_created else ""),
-            }
+    with cf.ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+        comp_results = list(ex.map(_list_comp, comps))
+    flat = [t for lst in comp_results for t in lst]
 
-            # 主 VNIC 与公网 IP(区分临时/保留)
-            try:
-                for att in oci.pagination.list_call_get_all_results(
-                    compute.list_vnic_attachments, comp_id, instance_id=ins.id
-                ).data:
-                    if att.lifecycle_state != "ATTACHED":
-                        continue
-                    v = net.get_vnic(att.vnic_id).data
-                    if getattr(v, "is_primary", False):
-                        row["public_ip"] = v.public_ip
-                        row["private_ip"] = v.private_ip
-                        row["vnic_id"] = v.id
-                        if v.public_ip:
-                            try:
-                                pub = net.get_public_ip_by_ip_address(
-                                    oci.core.models.GetPublicIpByIpAddressDetails(ip_address=v.public_ip)
-                                ).data
-                                row["public_lifetime"] = pub.lifetime if pub else None
-                            except Exception:  # noqa: BLE001
-                                pass
-                        break
-            except Exception as e:  # noqa: BLE001
-                log.warning("查询实例 %s VNIC 失败:%s", ins.display_name, e)
-
-            # 启动盘
-            try:
-                boots = compute.list_boot_volume_attachments(
-                    compartment_id=comp_id,
-                    availability_domain=ins.availability_domain,
-                    instance_id=ins.id,
-                ).data
-                if boots:
-                    bs = _client(oci, oci.core.BlockstorageClient, cfg)
-                    bv = bs.get_boot_volume(boots[0].boot_volume_id).data
-                    row["boot_gbs"] = bv.size_in_gbs
-                    row["boot_volume_id"] = bv.id
-            except Exception as e:  # noqa: BLE001
-                log.debug("查询实例 %s 启动盘失败:%s", ins.display_name, e)
-
-            rows.append(row)
+    # 2) 并行补全每台实例的 VNIC/IP/启动盘
+    with cf.ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+        futs = [ex.submit(_enrich_instance, oci, cfg, c, n, ins, acct)
+                for c, n, ins in flat]
+        rows = [f.result() for f in futs]
 
     rows.sort(key=lambda r: (r["account_name"], r["region"], r["name"]))
     return rows
@@ -438,7 +481,13 @@ def change_public_ip(progress, acct: dict, compartment_id: str, instance_id: str
             compute.instance_action(instance_id, compartment_id, action="START")
             _wait_state(compute, instance_id, {"RUNNING"}, progress)
 
-        new_ip = net.get_vnic(vnic.id).data.public_ip
+        # RUNNING 后公网 IP 分配可能稍有延迟,轮询等待(最多 ~30s)
+        new_ip = None
+        for _ in range(6):
+            new_ip = net.get_vnic(vnic.id).data.public_ip
+            if new_ip:
+                break
+            time.sleep(5)
         progress(f"新公网 IP:{new_ip}")
         return {"old_ip": old_ip, "new_ip": new_ip}
     except Exception as e:  # noqa: BLE001
@@ -557,7 +606,8 @@ def open_ports(acct: dict, compartment_id: str, instance_id: str, ports: list[in
     """向主 VNIC 所在子网的全部安全列表追加 TCP 入站规则(全网段),已存在则跳过。"""
     try:
         oci = _sdk()
-        net = _client(oci, oci.core.VirtualNetworkClient, build_config(acct))
+        cfg = build_config(acct)
+        net = _client(oci, oci.core.VirtualNetworkClient, cfg)
         vnic = _primary_vnic(oci, cfg, compartment_id, instance_id)
         subnet = net.get_subnet(vnic.subnet_id).data
 
@@ -671,18 +721,26 @@ def account_quota(acct: dict) -> dict:
 
         ads = [ad.name for ad in identity.list_availability_domains(tenancy).data]
 
-        limits_out = []
-        for lname, desc in sorted(wanted):
-            items = []
-            for ad in ads:
-                ra = limits.get_resource_availability(
-                    svc, lname, tenancy, availability_domain=ad).data
-                items.append({
-                    "ad": _ad_short(ad),
-                    "available": getattr(ra, "available", None),
-                    "used": getattr(ra, "used", None),
-                })
-            limits_out.append({"name": lname, "description": desc, "items": items})
+        # 各限额 × 各 AD 的用量查询相互独立,并行发出(原来串行 3×AD 次调用)
+        def _avail(pair: tuple[str, str, str]) -> tuple[str, str, dict]:
+            lname, desc, ad = pair
+            ra = limits.get_resource_availability(
+                svc, lname, tenancy, availability_domain=ad).data
+            return (lname, desc, {
+                "ad": _ad_short(ad),
+                "available": getattr(ra, "available", None),
+                "used": getattr(ra, "used", None),
+            })
+
+        pairs = [(lname, desc, ad) for lname, desc in sorted(wanted) for ad in ads]
+        with cf.ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as ex:
+            results = list(ex.map(_avail, pairs))
+
+        grouped: dict[str, dict] = {}
+        for lname, desc, item in results:
+            g = grouped.setdefault(lname, {"name": lname, "description": desc, "items": []})
+            g["items"].append(item)
+        limits_out = list(grouped.values())
 
         # 订阅类型(免费层 / PAYG):需先找 home region
         payment_model = None
@@ -722,23 +780,28 @@ def _traffic_impl(acct: dict, compartment_id: str, hours: int) -> dict:
     # 按时间范围自适应聚合粒度,控制点数
     window = "1h" if hours <= 72 else ("6h" if hours <= 240 else "1d")
 
-    series: dict[int, dict] = {}
-    totals = {"down": 0.0, "up": 0.0}
-
-    for metric, key in (("VnicFromNetworkBytes", "down"), ("VnicToNetworkBytes", "up")):
+    def _query(metric: str):
         details = oci.monitoring.models.SummarizeMetricsDataDetails(
             namespace="oci_computeagent",
             query=f"{metric}[{window}].sum()",
             start_time=start,
             end_time=end,
         )
-        data = mon.summarize_metrics_data(compartment_id, details).data
-        for md in data:
-            for ts, val in zip(md.timestamps, md.aggregated_samples):
-                bucket = int(ts.timestamp())
-                slot = series.setdefault(bucket, {"t": ts.isoformat(), "down": 0.0, "up": 0.0})
-                slot[key] += float(val or 0)
-                totals[key] += float(val or 0)
+        return mon.summarize_metrics_data(compartment_id, details).data
+
+    series: dict[int, dict] = {}
+    totals = {"down": 0.0, "up": 0.0}
+
+    with cf.ThreadPoolExecutor(max_workers=2) as ex:
+        f_down = ex.submit(_query, "VnicFromNetworkBytes")
+        f_up = ex.submit(_query, "VnicToNetworkBytes")
+        for key, fut in (("down", f_down), ("up", f_up)):
+            for md in fut.result():
+                for ts, val in zip(md.timestamps, md.aggregated_samples):
+                    bucket = int(ts.timestamp())
+                    slot = series.setdefault(bucket, {"t": ts.isoformat(), "down": 0.0, "up": 0.0})
+                    slot[key] += float(val or 0)
+                    totals[key] += float(val or 0)
 
     points = [series[k] for k in sorted(series)]
     return {"hours": hours, "window": window, "points": points,

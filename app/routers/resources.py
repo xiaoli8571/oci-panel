@@ -1,16 +1,22 @@
-"""资源操作接口:元数据 / 创建实例 / 网络(IPv6·保留IP·端口) / 卷 / 配额订阅。"""
+"""资源操作接口:元数据 / 创建实例 / 网络(IPv6·保留IP·端口) / 卷 / 配额订阅。
+
+v0.10.0:表单元数据(compartments/ads/images/subnets)带 TTL 缓存,表单打开更快。
+"""
 import re
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .. import jobs, oci_client
+from .. import config, jobs, oci_client
 from ..database import db
 from ..schemas import (CreateInstanceReq, NetRef, PortsReq, RenameReq,
                        ReservedIpOp, ResizeReq, TerminateReq, VolumeUpdateReq)
+from ..ttlcache import TTLCache
 
 router = APIRouter(prefix="/api", tags=["resources"])
 
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,59}$")
+
+_meta_cache: TTLCache = TTLCache(ttl=float(config.META_CACHE_TTL), max_items=256)
 
 
 def _get_account(account_id: int) -> dict:
@@ -21,28 +27,46 @@ def _get_account(account_id: int) -> dict:
     return dict(row)
 
 
+def _meta(account_id: int, kind: str, compute):
+    """元数据缓存读取:未命中则计算并写入。"""
+    key = f"{account_id}:{kind}"
+    val = _meta_cache.get(key)
+    if val is None:
+        val = compute()
+        _meta_cache.set(key, val)
+    return val
+
+
 # ---------------------------------------------------------------- 表单元数据
 
 @router.get("/meta/compartments")
 def meta_compartments(account_id: int):
-    return {"items": oci_client.list_compartments(_get_account(account_id))}
+    acct = _get_account(account_id)
+    return {"items": _meta(account_id, "compartments",
+                           lambda: oci_client.list_compartments(acct))}
 
 
 @router.get("/meta/ads")
 def meta_ads(account_id: int):
-    return {"items": oci_client.list_ads(_get_account(account_id))}
+    acct = _get_account(account_id)
+    return {"items": _meta(account_id, "ads", lambda: oci_client.list_ads(acct))}
 
 
 @router.get("/meta/images")
 def meta_images(account_id: int, compartment_id: str, os: str = "Canonical Ubuntu",
                 shape: str = "VM.Standard.E2.1.Micro"):
-    return {"items": oci_client.list_platform_images(
-        _get_account(account_id), compartment_id, shape, os)}
+    acct = _get_account(account_id)
+    return {"items": _meta(
+        account_id, f"images:{compartment_id}:{os}:{shape}",
+        lambda: oci_client.list_platform_images(acct, compartment_id, shape, os))}
 
 
 @router.get("/meta/subnets")
 def meta_subnets(account_id: int, compartment_id: str):
-    return {"items": oci_client.list_public_subnets(_get_account(account_id), compartment_id)}
+    acct = _get_account(account_id)
+    return {"items": _meta(
+        account_id, f"subnets:{compartment_id}",
+        lambda: oci_client.list_public_subnets(acct, compartment_id))}
 
 
 # ---------------------------------------------------------------- 实例属性操作

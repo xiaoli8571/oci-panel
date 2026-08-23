@@ -1,29 +1,47 @@
-"""AWS 管理(boto3):EC2 全区域扫描 + Lightsail 全区域扫描。"""
+"""AWS 管理(boto3):EC2 全区域扫描 + Lightsail 全区域扫描。
+
+v0.10.0:boto3 客户端按「凭据摘要+区域」缓存复用,避免每次扫描重复构建客户端。
+"""
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import logging
 import time
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
+from . import ttlcache
 from .pcreds import ProviderError, extra_creds
 
 log = logging.getLogger("aws")
 
+_BOTO_CLIENTS: ttlcache.TTLCache = ttlcache.TTLCache(ttl=600.0, max_items=128)
+
+
+def _cred_hash(c: dict) -> str:
+    raw = f"{c.get('aws_access_key_id','')}:{c.get('aws_secret_key','')}"
+    return hashlib.md5(raw.encode()).hexdigest()[:16]
+
 
 def _client(acct: dict, region: str | None = None):
     c = extra_creds(acct)
-    try:
-        return boto3.client(
-            "ec2",
-            region_name=region or acct.get("region") or "us-east-1",
-            aws_access_key_id=c["aws_access_key_id"],
-            aws_secret_access_key=c["aws_secret_key"],
-        )
-    except (BotoCoreError, KeyError) as e:
-        raise ProviderError(f"AWS 客户端创建失败:{e}") from e
+    region = region or acct.get("region") or "us-east-1"
+    key = ("ec2", _cred_hash(c), region)
+    cli = _BOTO_CLIENTS.get(key)
+    if cli is None:
+        try:
+            cli = boto3.client(
+                "ec2",
+                region_name=region,
+                aws_access_key_id=c["aws_access_key_id"],
+                aws_secret_access_key=c["aws_secret_key"],
+            )
+        except (BotoCoreError, KeyError) as e:
+            raise ProviderError(f"AWS 客户端创建失败:{e}") from e
+        _BOTO_CLIENTS.set(key, cli)
+    return cli
 
 
 def _wrap(e: Exception) -> ProviderError:
@@ -196,9 +214,14 @@ _LS_FALLBACK = [
 
 def _ls(acct: dict, region: str):
     c = extra_creds(acct)
-    return boto3.client("lightsail", region_name=region,
-                        aws_access_key_id=c["aws_access_key_id"],
-                        aws_secret_access_key=c["aws_secret_key"])
+    key = ("lightsail", _cred_hash(c), region)
+    cli = _BOTO_CLIENTS.get(key)
+    if cli is None:
+        cli = boto3.client("lightsail", region_name=region,
+                           aws_access_key_id=c["aws_access_key_id"],
+                           aws_secret_access_key=c["aws_secret_key"])
+        _BOTO_CLIENTS.set(key, cli)
+    return cli
 
 
 def lightsail_regions(acct: dict) -> list[str]:

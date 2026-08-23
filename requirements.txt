@@ -1,5 +1,5 @@
 fastapi>=0.104,<1.0
-uvicorn>=0.23
+uvicorn[standard]>=0.23
 oci>=2.120
 cryptography>=41
 asyncssh>=2.14

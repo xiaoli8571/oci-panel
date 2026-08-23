@@ -115,3 +115,17 @@ def verify_session(token: str | None) -> bool:
         return int(exp_s) > time.time()
     except (ValueError, TypeError):
         return False
+
+
+def cookie_secure(scheme: str = "") -> bool:
+    """按配置决定 Cookie 是否带 Secure 属性。
+
+    auto(默认):请求为 https(含反代 X-Forwarded-Proto)时开启;
+    always:强制开启;off:关闭。
+    """
+    mode = (config.COOKIE_SECURE or "auto").lower()
+    if mode == "always":
+        return True
+    if mode == "off":
+        return False
+    return scheme.lower() == "https"

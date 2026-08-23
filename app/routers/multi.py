@@ -130,16 +130,25 @@ def cf_workers(account_id: int):
         raise HTTPException(400, "Token 下没有可见的 Cloudflare 账户(Account.Read 权限?)")
     items = []
     sub = ""
-    for a in cfas[:5]:
+    # 各账户 Workers 列表并行拉取(原来串行最多 5 次 CF API)
+    import concurrent.futures as cfpool
+
+    def _workers(a):
         try:
-            ws = cfmod.workers_list(acct, a["cf_account_id"])
+            return a["name"], cfmod.workers_list(acct, a["cf_account_id"])
         except Exception:  # noqa: BLE001
-            ws = []
-        for w in ws:
-            w["cf_account_name"] = a["name"]
-            items.append(w)
-        if not sub:
-            sub = cfmod.subdomain(acct, a["cf_account_id"])
+            return a["name"], []
+
+    with cfpool.ThreadPoolExecutor(max_workers=5) as ex:
+        for name, ws in ex.map(_workers, cfas[:5]):
+            for w in ws:
+                w["cf_account_name"] = name
+                items.append(w)
+            if not sub:
+                try:
+                    sub = cfmod.subdomain(acct, cfas[0]["cf_account_id"])
+                except Exception:  # noqa: BLE001
+                    sub = ""
     return {"items": items, "subdomain": sub}
 
 

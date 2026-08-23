@@ -1,5 +1,6 @@
-"""SQLite 存储:账户表。"""
+"""SQLite 存储:账户表。WAL 模式 + 连接复用,支持 Web 与守护线程并发读写。"""
 import sqlite3
+import threading
 from contextlib import contextmanager
 
 from . import config
@@ -58,21 +59,49 @@ CREATE TABLE IF NOT EXISTS ssh_creds(
 """
 
 
+_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_g_events_created ON g_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_g_events_acct ON g_events(account_id, kind);
+CREATE INDEX IF NOT EXISTS idx_vps_host ON vps_hosts(host, port);
+"""
+
+_conn: sqlite3.Connection | None = None
+_conn_lock = threading.Lock()
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(config.DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    # WAL 模式:读写不互斥,面板请求(读)与守护线程(写)并发不再互相阻塞;
+    # busy_timeout 兜底偶发锁竞争。
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=10000")
+    return conn
+
+
 @contextmanager
 def db():
-    conn = sqlite3.connect(config.DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """复用单个长连接(加锁串行化写事务),避免每请求重建连接的开销。"""
+    global _conn
+    if _conn is None:
+        with _conn_lock:
+            if _conn is None:
+                config.ensure_dirs()
+                _conn = _connect()
     try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+        yield _conn
+        _conn.commit()
+    except Exception:
+        _conn.rollback()
+        raise
 
 
 def init() -> None:
     config.ensure_dirs()
     with db() as c:
         c.executescript(_SCHEMA)
+        c.executescript(_INDEXES)
         # 多提供商迁移:provider + 加密的额外凭证(extra_enc)
         cols = {r[1] for r in c.execute("PRAGMA table_info(accounts)").fetchall()}
         if "provider" not in cols:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import requests
 
+from . import http_pool
 from .pcreds import ProviderError, extra_creds
 
 API = "https://api005.dnshe.com/index.php"
@@ -31,9 +32,9 @@ def _req(acct: dict, endpoint: str, action: str = "",
                "Content-Type": "application/json"}
     try:
         if method == "GET":
-            r = requests.get(url, headers=headers, params=data, timeout=25)
+            r = http_pool.get(url, headers=headers, params=data, timeout=25)
         else:
-            r = requests.request(method, url, headers=headers, json=data or {}, timeout=25)
+            r = http_pool.request(method, url, headers=headers, json=data or {}, timeout=25)
     except requests.RequestException as e:
         raise ProviderError(f"DNSHE 网络错误:{e}") from e
     try:

@@ -10,6 +10,7 @@ import traceback
 _lock = threading.Lock()
 _JOBS: dict = {}
 _MAX_KEEP = 60
+_MAX_LOG = 2000   # 单任务日志条数上限,防止长任务撑爆内存
 
 
 def _prune() -> None:
@@ -38,7 +39,11 @@ def start_job(name: str, fn, *args) -> dict:
         _prune()
 
     def cb(msg: str):
-        job["log"].append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+        with _lock:
+            log_list = job["log"]
+            log_list.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+            if len(log_list) > _MAX_LOG:
+                del log_list[: len(log_list) - _MAX_LOG]
 
     def worker():
         try:
@@ -56,6 +61,13 @@ def start_job(name: str, fn, *args) -> dict:
 
 
 def get_job(jid: str) -> dict | None:
+    """返回任务快照(日志拷贝),避免遍历时列表被并发修改。"""
     with _lock:
         job = _JOBS.get(jid)
-        return dict(job) if job else None
+        if not job:
+            return None
+        return {
+            "id": job["id"], "name": job["name"], "status": job["status"],
+            "log": list(job["log"]), "result": job["result"],
+            "error": job["error"], "created": job["created"],
+        }

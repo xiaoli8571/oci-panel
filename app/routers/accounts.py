@@ -10,7 +10,9 @@ from fastapi import APIRouter, HTTPException
 
 from .. import oci_client, security
 from ..database import db
+from ..routers.instances import _invalidate_cache
 from ..schemas import AccountIn
+from ..ttlcache import client_cache
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -136,6 +138,8 @@ async def update_account(account_id: int, body: AccountIn):
              body.tenancy_ocid.strip(), body.region.strip().lower(),
              body.fingerprint.strip().lower(), key_enc, extra_enc, account_id),
         )
+    # 凭据可能已变更:失效该账户的 SDK 客户端与实例缓存
+    _invalidate_cache(account_id)
     return {"ok": True}
 
 
@@ -145,6 +149,8 @@ def delete_account(account_id: int):
         cur = c.execute("DELETE FROM accounts WHERE id=?", (account_id,))
         if cur.rowcount == 0:
             raise HTTPException(404, "账户不存在")
+    _invalidate_cache(account_id)
+    client_cache.drop(f"{account_id}:")
     return {"ok": True}
 
 

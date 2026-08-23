@@ -12,6 +12,19 @@ router = APIRouter(prefix="/api", tags=["auth"])
 _fail: dict[str, list] = {}
 _MAX_FAILS = 5
 _LOCK_SECONDS = 60
+_last_gc = 0.0
+
+
+def _gc_fail_map() -> None:
+    """定期清理过期的失败记录,防止字典随扫描 IP 无限增长。"""
+    global _last_gc
+    now = time.time()
+    if now - _last_gc < 300:
+        return
+    _last_gc = now
+    for ip, rec in list(_fail.items()):
+        if rec[1] and now > rec[1]:
+            _fail.pop(ip, None)
 
 
 def _locked(ip: str) -> int:
@@ -31,6 +44,8 @@ def _locked(ip: str) -> int:
 @router.post("/login")
 def login(body: LoginReq, request: Request, response: Response):
     ip = request.client.host if request.client else "?"
+    _gc_fail_map()
+
     remain = _locked(ip)
     if remain > 0:
         return JSONResponse({"detail": f"失败次数过多,{remain} 秒后重试"}, status_code=429)
@@ -46,11 +61,13 @@ def login(body: LoginReq, request: Request, response: Response):
         return JSONResponse({"detail": detail}, status_code=401)
 
     _fail.pop(ip, None)
+    scheme = (request.headers.get("x-forwarded-proto") or request.url.scheme or "")
     response.set_cookie(
         security.COOKIE_NAME,
         security.create_session(),
         httponly=True,
         samesite="lax",
+        secure=security.cookie_secure(scheme),
         max_age=config.SESSION_TTL,
         path="/",
     )

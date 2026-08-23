@@ -2,6 +2,37 @@
 
 仿照 [semicons/java_oci_manage](https://github.com/semicons/java_oci_manage)(R探长)实现的 **Oracle Cloud (OCI) 网页管理面板**,使用 Python (FastAPI) + 原生前端实现,单文件部署、无外部数据库依赖。
 
+## 🚦 更新日志
+
+### v0.10.0(性能优化 + 稳定性修复)
+
+**性能**
+- 实例总览:多账户并行扫描;单实例 VNIC/启动盘/保留IP 判定并行化,大账户列表提速数倍
+- 缓存升级 stale-while-revalidate:过期请求秒回旧数据 + 后台自动刷新(`?refresh=1` 强制刷新);`INSTANCE_CACHE_TTL` 可调
+- OCI SDK / boto3 / Lightsail 客户端缓存复用(免重复解密私钥、解析 PEM、构建客户端)
+- 创建实例表单元数据(区间/AD/镜像/子网)TTL 缓存(`META_CACHE_TTL`)
+- 配额查询、流量指标、CF Workers 列表等独立 API 调用并行发出
+- SQLite 启用 WAL 模式 + 连接复用,Web 与守护线程并发不再互相阻塞;新增事件表索引
+- HTTP 连接池(Cloudflare/DNSHE/Telegram/Webhook 复用 TLS 连接)
+- 响应 GZip 压缩(首页 125KB→32KB);静态资源浏览器缓存 24h;xterm.js 改为首次打开 SSH 时懒加载
+
+**修复**
+- 🔴 「一键开放端口」因变量未定义必然报错的 bug
+- 🔴 Web SSH 首次连接确认指纹后未保存,导致每次都弹确认框(TOFU 记录失效)
+- 换 IP 后立即读取公网 IP 可能为空,现轮询等待分配
+- 任务日志加长度上限与并发快照,长任务不再撑爆内存
+- 登录防爆破记录定期清理;Cookie 支持 `COOKIE_SECURE=auto`(HTTPS 自动加 Secure)
+
+**运维**
+- 新增 `/healthz` 健康检查;Dockerfile 与 docker-compose 内置 HEALTHCHECK
+
+### 历史
+
+- v0.9.3:修复 CF 删除记录 405(record_id 字段映射)+ SSH/SFTP 弹窗自动带出已存用户名
+- v0.9.2:SSH/SFTP 凭据可保存(加密凭据库),云实例免重复输密码
+- v0.9.1:手动添加 VPS 统一纳管 + SSH/SFTP 融入实例行 + 页面大合并(7页→4页)
+- v0.9.0:多云管理面板(OCI/AWS/Cloudflare/DNSHE), Web SSH 轻量版, CF Git 部署
+
 ## ✨ 功能
 
 | 功能 | 说明 |
@@ -55,6 +86,10 @@ docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
 | `PANEL_PASSWORD` | 自动生成 | 面板登录密码 |
 | `PORT` | 8080 | 监听端口 |
 | `GUARDIAN_INTERVAL` | 300 | 守护巡检间隔(秒,最小 60) |
+| `INSTANCE_CACHE_TTL` | 30 | 实例总览缓存秒数(stale-while-revalidate) |
+| `META_CACHE_TTL` | 120 | 创建实例表单元数据缓存秒数 |
+| `MAX_WORKERS` | 8 | 云账户/实例并行扫描线程上限 |
+| `COOKIE_SECURE` | auto | Cookie Secure 属性(auto/always/off) |
 
 ## 🔒 安全说明
 
@@ -85,11 +120,11 @@ docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
 
 ## 🗺 Roadmap
 
-- [ ] 预留公网 IP 的创建与绑定
-- [ ] 引导卷扩容 / 更改 VPUs 性能层级
 - [ ] 服务限额(Limits)查询,一键检测可开机器数
-- [ ] 多区域聚合视图、Telegram/Bark 通知
 - [ ] 多用户与操作审计日志
+- [x] ~~预留公网 IP 的创建与绑定~~ (v0.9.x 已完成)
+- [x] ~~引导卷扩容 / 更改 VPUs 性能层级~~ (v0.9.x 已完成)
+- [x] ~~多区域聚合视图、Telegram/Bark 通知~~ (v0.9.x 已完成)
 
 ## ⚠️ 免责声明
 

@@ -7,6 +7,16 @@ services:
     environment:
       # 不设置则首次启动自动生成随机密码(打印在日志里)
       - PANEL_PASSWORD=${PANEL_PASSWORD:-}
+      # 实例总览缓存秒数(stale-while-revalidate);默认 30
+      # - INSTANCE_CACHE_TTL=30
+      # 表单元数据缓存秒数;默认 120
+      # - META_CACHE_TTL=120
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

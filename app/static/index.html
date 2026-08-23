@@ -5,9 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0e1319">
 <title>OCI Manage Lite · 云管理面板</title>
-<link rel="stylesheet" href="/static/vendor/xterm.min.css">
-<script src="/static/vendor/xterm.min.js"></script>
-<script src="/static/vendor/addon-fit.min.js"></script>
+<link rel="stylesheet" href="/static/vendor/xterm.min.css" media="print" onload="this.media='all'">
+<script>
+/* xterm.js 按需懒加载:首次打开 Web SSH 时才加载,加快首屏渲染 */
+let _xtermLoading = null;
+function loadXterm() {
+  if (window.Terminal && window.FitAddon) return Promise.resolve();
+  if (_xtermLoading) return _xtermLoading;
+  _xtermLoading = new Promise((res, rej) => {
+    let n = 0;
+    const done = ok => { if (ok) res(); else rej(new Error("xterm.js 加载失败")); };
+    const s1 = document.createElement("script");
+    const s2 = document.createElement("script");
+    s1.src = "/static/vendor/xterm.min.js";
+    s2.src = "/static/vendor/addon-fit.min.js";
+    s1.onload = () => s2.onload = () => done(true);
+    s1.onerror = s2.onerror = () => done(false);
+    document.head.appendChild(s1);
+    document.head.appendChild(s2);
+  });
+  return _xtermLoading;
+}
+</script>
 <style>
 :root{
   --bg:#0e1319; --panel:#161d27; --panel2:#1c2532; --line:#263140;
@@ -1679,10 +1698,10 @@ async function sshListSaved() {
     }
   } catch (e) { box.textContent = ""; }
 }
-function sshEnsureTerm() {
+async function sshEnsureTerm() {
   if (sshTerm) return true;
   try {
-    if (typeof Terminal === "undefined") throw new Error("xterm.js 未加载");
+    if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") await loadXterm();
     sshTerm = new Terminal({ cursorBlink:true, fontSize:13, fontFamily:'ui-monospace,Consolas,monospace',
       theme:{ background:"#0a0f15", foreground:"#dbe4ee", cursor:"#4f8cff" } });
     sshFit = new FitAddon.FitAddon();
@@ -1724,7 +1743,7 @@ async function sshConnect() {
       toast("💾 凭据已加密保存到面板", "ok");
     } catch (e) { toast("保存凭据失败:" + e.message, "err"); }
   }
-  if (!sshEnsureTerm()) return;
+  if (!(await sshEnsureTerm())) return;
   sshDisconnect();
   sshStatus("连接中…");
   const proto = location.protocol === "https:" ? "wss" : "ws";

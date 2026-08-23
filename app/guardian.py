@@ -16,7 +16,7 @@ import urllib.request
 
 import requests
 
-from . import aws_cloud, database, oci_client
+from . import aws_cloud, database, http_pool, oci_client
 from .pcreds import ProviderError
 
 log = logging.getLogger("guardian")
@@ -95,9 +95,9 @@ def set_tg(bot_token: str, chat_id: str) -> None:
 def send_tg(token: str, chat_id: str, text: str) -> None:
     """通过 Telegram Bot API 发送消息;失败抛 ProviderError(带官方描述)。"""
     try:
-        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                          json={"chat_id": chat_id, "text": text,
-                                "disable_web_page_preview": True}, timeout=10)
+        r = http_pool.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                           json={"chat_id": chat_id, "text": text,
+                                 "disable_web_page_preview": True}, timeout=10)
         d = r.json()
     except requests.RequestException as e:
         raise ProviderError(f"Telegram 网络错误:{e}") from e

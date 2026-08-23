@@ -1,10 +1,11 @@
-"""Cloudflare API 封装(REST,无需 SDK)。"""
+"""Cloudflare API 封装(REST,无需 SDK)。使用进程级连接池复用 TLS 连接。"""
 from __future__ import annotations
 
 import re
 
 import requests
 
+from . import http_pool
 from .pcreds import ProviderError, extra_creds
 
 API = "https://api.cloudflare.com/client/v4"
@@ -25,8 +26,8 @@ def verify_token(acct: dict) -> dict:
                   "looks_like_global_key": bool(re.match(r"^[0-9a-f]{37,40}$", token, re.I)),
                   "prefix": token[:5]}
     try:
-        r = requests.get(f"{API}/user/tokens/verify",
-                         headers={"Authorization": f"Bearer {token}"}, timeout=20)
+        r = http_pool.get(f"{API}/user/tokens/verify",
+                          headers={"Authorization": f"Bearer {token}"}, timeout=20)
         d = r.json()
     except requests.RequestException as e:
         raise ProviderError(f"Cloudflare 网络错误:{e}") from e
@@ -36,25 +37,27 @@ def verify_token(acct: dict) -> dict:
     if d.get("success") and (d.get("result") or {}).get("status") == "active":
         info["valid"] = True
         info["status"] = "active"
+        zone_items: list[dict] = []
         try:
-            info["zones"] = len(zones(acct))
+            zone_items = zones(acct)
+            info["zones"] = len(zone_items)
         except ProviderError as e:
             info["zones_error"] = str(e)
         try:
             info["accounts"] = len(accounts_list(acct))
         except ProviderError as e:
             info["accounts_error"] = str(e)
-        if info.get("zones"):
+        if zone_items:
             try:
-                first_id = zones(acct)[0]["id"]
-                records(acct, first_id)
+                records(acct, zone_items[0]["id"])
                 info["dns_read"] = True
             except ProviderError as e:
                 info["dns_read"] = False
                 info["dns_error"] = str(e)
         else:
-            info["zones"] = 0
-            info["dns_read"] = None
+            if "zones" not in info:
+                info["zones"] = 0
+            info.setdefault("dns_read", None)
     else:
         info["valid"] = False
         info["errors"] = d.get("errors") or [{"code": r.status_code, "message": r.text[:120]}]
@@ -64,9 +67,9 @@ def verify_token(acct: dict) -> dict:
 def cf(acct_or_token, method: str, path: str, *, raw: bool = False, **kw):
     token = acct_or_token if isinstance(acct_or_token, str) else token_of(acct_or_token)
     try:
-        r = requests.request(method, API + path, timeout=25,
-                             headers={"Authorization": f"Bearer {token}", **kw.pop("headers", {})},
-                             **kw)
+        r = http_pool.request(method, API + path, timeout=25,
+                              headers={"Authorization": f"Bearer {token}", **kw.pop("headers", {})},
+                              **kw)
     except requests.RequestException as e:
         raise ProviderError(f"Cloudflare 网络错误:{e}") from e
     if raw:
@@ -210,11 +213,11 @@ def deploy_from_github(acct: dict, cf_account_id: str, repo_url: str,
         headers["Authorization"] = f"Bearer {token}"
 
     try:
-        r = requests.get(
+        r = http_pool.get(
             f"https://codeload.github.com/{owner}/{repo}/tar.gz/refs/heads/{branch}",
             headers=headers, timeout=60)
         if r.status_code != 200 and token:
-            r = requests.get(
+            r = http_pool.get(
                 f"https://api.github.com/repos/{owner}/{repo}/tarball/{branch}",
                 headers=headers, timeout=60)
         if r.status_code != 200:

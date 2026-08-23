@@ -8,6 +8,7 @@ import re
 
 import requests
 
+from . import http_pool
 from .pcreds import ProviderError, extra_creds
 
 BASE = "https://dns.he.net"
@@ -103,13 +104,13 @@ def ddns_update(acct: dict, hostname: str, secret: str, ip: str = "") -> dict:
     """
     if not ip:
         try:
-            ip = requests.get("https://ifconfig.me", timeout=10).text.strip()
+            ip = http_pool.get("https://ifconfig.me", timeout=10).text.strip()
         except requests.RequestException as e:
             raise ProviderError(f"获取本机公网 IP 失败:{e}") from e
     try:
-        r = requests.get(f"{BASE}/nic/update",
-                         params={"hostname": hostname, "password": secret, "myip": ip},
-                         headers={"User-Agent": _UA}, timeout=25)
+        r = http_pool.get(f"{BASE}/nic/update",
+                          params={"hostname": hostname, "password": secret, "myip": ip},
+                          headers={"User-Agent": _UA}, timeout=25)
         text = r.text.strip()
     except requests.RequestException as e:
         raise ProviderError(f"HE DDNS 网络错误:{e}") from e

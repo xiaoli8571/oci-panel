@@ -89,6 +89,8 @@ async def ws_ssh(websocket: WebSocket):
     writer = None
     pump_task = None
     pending_trust = False
+    # TOFU 校验上下文:open 时记住主机与指纹,trust 确认后据此写入 known_hosts
+    cur_host, cur_port, cur_fp = "", 22, ""
 
     async def pump(reader):
         nonlocal writer
@@ -167,7 +169,9 @@ async def ws_ssh(websocket: WebSocket):
                     continue
 
                 # 主机指纹 TOFU 校验
+                cur_host, cur_port = host, port
                 fp = _hostkey_fp() or ""
+                cur_fp = fp
                 known = _load_known()
                 k = f"{host}:{port}"
                 if known.get(k) and known[k] != fp:
@@ -189,11 +193,10 @@ async def ws_ssh(websocket: WebSocket):
                 await _send(websocket, type="opened")
 
             elif t == "trust" and pending_trust and conn is not None:
+                # 前端只发 {type:"trust"},主机信息用 open 时记住的 cur_host/cur_port/cur_fp
                 known = _load_known()
-                host = str(msg.get("host", "")); port = int(msg.get("port", 22))
-                fp = _hostkey_fp() or ""
-                if host:
-                    known[f"{host}:{port}"] = fp
+                if cur_host:
+                    known[f"{cur_host}:{cur_port}"] = cur_fp
                     _save_known(known)
                 pending_trust = False
                 writer_obj, reader, _ = await conn.open_session(
