@@ -7,6 +7,15 @@
 <title>OCI Manage Lite · 云管理面板</title>
 <link rel="stylesheet" href="/static/vendor/xterm.min.css" media="print" onload="this.media='all'">
 <script>
+/* 主题:localStorage 记忆 → 系统偏好,尽早执行避免闪烁 */
+(function(){
+  let t = null;
+  try { t = localStorage.getItem("panel-theme"); } catch(e) {}
+  if (t !== "light" && t !== "dark") {
+    t = (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+  }
+  document.documentElement.dataset.theme = t;
+})();
 /* xterm.js 按需懒加载:首次打开 Web SSH 时才加载,加快首屏渲染 */
 let _xtermLoading = null;
 function loadXterm() {
@@ -32,6 +41,17 @@ function loadXterm() {
   --bg:#0e1319; --panel:#161d27; --panel2:#1c2532; --line:#263140;
   --text:#dbe4ee; --muted:#8296ab; --accent:#4f8cff; --accent2:#2f6fe0;
   --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --cyan:#22d3ee; --purple:#a78bfa;
+  --input-bg:#0f1620; --hover-bg:#1a2330; --header-bg:rgba(15,20,27,.92);
+  --mask-bg:rgba(5,8,12,.7); --log-bg:#0a0f15; --login-glow:#16233a; --grid-line:#1c2532;
+  --shadow:0 6px 24px rgba(0,0,0,.4);
+}
+html[data-theme="light"]{
+  --bg:#f2f5fa; --panel:#ffffff; --panel2:#eaeff7; --line:#d9e1ec;
+  --text:#22303f; --muted:#64748b; --accent:#2f6fe0; --accent2:#245cc4;
+  --green:#16a34a; --red:#dc2626; --amber:#d97706; --cyan:#0891b2; --purple:#7c3aed;
+  --input-bg:#fbfcfe; --hover-bg:#eef3fa; --header-bg:rgba(255,255,255,.92);
+  --mask-bg:rgba(15,23,42,.45); --log-bg:#f6f8fb; --login-glow:#dbeafe; --grid-line:#dce4ef;
+  --shadow:0 6px 20px rgba(15,23,42,.12);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
@@ -39,11 +59,11 @@ a{color:var(--accent);text-decoration:none}
 button{cursor:pointer;border:none;border-radius:6px;font:inherit;color:#fff;background:var(--accent);padding:7px 14px;transition:.15s}
 button:hover{filter:brightness(1.12)}
 button:disabled{opacity:.4;cursor:not-allowed}
-input,select,textarea{width:100%;background:#0f1620;border:1px solid var(--line);border-radius:6px;color:var(--text);padding:8px 10px;font:inherit;outline:none}
+input,select,textarea{width:100%;background:var(--input-bg);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:8px 10px;font:inherit;outline:none}
 input:focus,textarea:focus,select:focus{border-color:var(--accent)}
 textarea{resize:vertical;min-height:110px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
 label{display:block;color:var(--muted);font-size:12px;margin:10px 0 4px}
-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;padding:0 22px;height:56px;background:rgba(15,20,27,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;padding:0 22px;height:56px;background:var(--header-bg);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
 .brand{font-weight:700;font-size:16px;letter-spacing:.5px;white-space:nowrap}
 .brand span{color:var(--accent)}
 nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
@@ -61,7 +81,7 @@ main{max-width:1320px;margin:0 auto;padding:22px}
 table{width:100%;border-collapse:collapse;min-width:1080px}
 th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
 th{color:var(--muted);font-weight:500;font-size:12px;background:var(--panel2);position:sticky;top:0}
-tbody tr:hover{background:#1a2330}
+tbody tr:hover{background:var(--hover-bg)}
 tbody tr:last-child td{border-bottom:none}
 td.wrap{white-space:normal}
 .ip{font-family:ui-monospace,Consolas,monospace;cursor:pointer}
@@ -82,7 +102,7 @@ td.wrap{white-space:normal}
 .btn-cyan{background:#0e7490}
 .btn-green{background:#15803d}
 .btn-purple{background:#6d28d9}
-.mask{position:fixed;inset:0;background:rgba(5,8,12,.7);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow:auto}
+.mask{position:fixed;inset:0;background:var(--mask-bg);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow:auto}
 .mask.show{display:flex}
 .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:100%;max-width:560px;padding:22px}
 .modal.wide{max-width:880px}
@@ -97,20 +117,20 @@ td.wrap{white-space:normal}
 .chip.on{border-color:var(--accent);color:var(--text);background:rgba(79,140,255,.15)}
 .sec{border-top:1px dashed var(--line);margin-top:16px;padding-top:12px}
 .sec h4{font-size:13px;margin-bottom:8px;color:var(--accent)}
-pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;padding:12px;max-height:300px;overflow:auto;font-size:12px;line-height:1.8;white-space:pre-wrap;word-break:break-all}
+pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:300px;overflow:auto;font-size:12px;line-height:1.8;white-space:pre-wrap;word-break:break-all}
 #toasts{position:fixed;right:18px;bottom:18px;z-index:99;display:flex;flex-direction:column;gap:8px}
-.toast{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:10px 16px;min-width:220px;max-width:420px;box-shadow:0 6px 24px rgba(0,0,0,.4);animation:in .2s}
+.toast{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:10px 16px;min-width:220px;max-width:420px;box-shadow:var(--shadow);animation:in .2s}
 .toast.err{border-left-color:var(--red)}
 .toast.ok{border-left-color:var(--green)}
 @keyframes in{from{transform:translateY(8px);opacity:0}}
-#loginMask{position:fixed;inset:0;background:radial-gradient(1200px 600px at 50% -10%,#16233a,var(--bg));display:none;align-items:center;justify-content:center;z-index:100}
+#loginMask{position:fixed;inset:0;background:radial-gradient(1200px 600px at 50% -10%,var(--login-glow),var(--bg));display:none;align-items:center;justify-content:center;z-index:100}
 #loginMask.show{display:flex}
 .login-card{width:340px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:30px;text-align:center}
 .login-card .logo{font-size:34px}
 .login-card h2{margin:8px 0 2px}
 .login-card p{color:var(--muted);font-size:12px;margin-bottom:18px}
 .err-text{color:var(--red);font-size:12px;min-height:18px;margin-top:8px}
-#trafCanvas{width:100%;height:260px;background:#0a0f15;border:1px solid var(--line);border-radius:8px}
+#trafCanvas{width:100%;height:260px;background:var(--log-bg);border:1px solid var(--line);border-radius:8px}
 .traf-sum{display:flex;gap:14px;margin-top:12px;flex-wrap:wrap;color:var(--muted)}
 .traf-sum b{color:var(--text)}
 .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
@@ -137,7 +157,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
 .term-tab.on{border-color:var(--accent)}
 .term-tab .x{color:var(--muted)} .term-tab .x:hover{color:var(--red)}
 #termArea{flex:1;min-height:420px}
-.term-wrap{position:relative;background:#0a0f15;border:1px solid var(--line);border-radius:10px;height:100%;padding:6px;display:none}
+.term-wrap{position:relative;background:var(--log-bg);border:1px solid var(--line);border-radius:10px;height:100%;padding:6px;display:none}
 .term-view{height:calc(100% - 0px)}
 .term-status{position:absolute;top:10px;right:16px;z-index:5;font-size:11px;color:var(--muted);background:rgba(10,15,21,.75);padding:2px 8px;border-radius:10px}
 .term-status.ok{color:var(--green)} .term-status.err{color:var(--red)}
@@ -234,6 +254,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
     <button id="nav-acct" onclick="showTab('acct')">账户设置</button>
   </nav>
   <div class="right">
+    <button class="btn-ghost" id="themeBtn" onclick="toggleTheme()" title="切换 浅色/深色 主题">☀️</button>
     <button class="btn-ghost" onclick="loadAll(true)">⟳ 刷新</button>
     <button class="btn-ghost" onclick="logout()">退出</button>
   </div>
@@ -433,7 +454,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <p class="hint">不勾选则凭据只保存在浏览器内存,关闭页面即清除;已保存凭据的主机,密码框留空即可直连。</p>
     </div>
     <div id="sshWrap" hidden>
-      <div style="position:relative;background:#0a0f15;border:1px solid var(--line);border-radius:10px;padding:6px;height:56vh;min-height:360px">
+      <div style="position:relative;background:var(--log-bg);border:1px solid var(--line);border-radius:10px;padding:6px;height:56vh;min-height:360px">
         <div class="term-status" id="ssh-status" style="position:absolute;top:10px;right:16px;z-index:5">未连接</div>
         <div id="ssh-term" style="height:100%"></div>
       </div>
@@ -872,6 +893,33 @@ function showTab(t) {
   if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); loadDomains(); }
   if (t === "cloud") initCloudTab();
 }
+
+/* ================= 主题(浅色/深色) ================= */
+function termTheme() {
+  const light = document.documentElement.dataset.theme === "light";
+  return light
+    ? { background: "#fbfcfe", foreground: "#24313f", cursor: "#2f6fe0",
+        selectionBackground: "rgba(47,111,224,.25)", cursorAccent: "#fbfcfe" }
+    : { background: "#0a0f15", foreground: "#dbe4ee", cursor: "#4f8cff",
+        selectionBackground: "rgba(79,140,255,.30)", cursorAccent: "#0a0f15" };
+}
+function setTheme(t, save = true) {
+  document.documentElement.dataset.theme = t;
+  if (save) { try { localStorage.setItem("panel-theme", t); } catch(e) {} }
+  const btn = document.getElementById("themeBtn");
+  if (btn) btn.textContent = t === "light" ? "🌙" : "☀️";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === "light" ? "#f2f5fa" : "#0e1319";
+  // 已打开的终端即时换肤
+  try { if (sshTerm) sshTerm.options.theme = termTheme(); } catch(e) {}
+  // 流量图表重绘(读取新配色)
+  try { if (window.__trafPoints && typeof drawChart === "function") drawChart(window.__trafPoints); } catch(e) {}
+}
+function toggleTheme() {
+  setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+}
+// 初始按钮图标与 meta(head 内联脚本已设置 data-theme)
+setTheme(document.documentElement.dataset.theme || "dark", false);
 
 /* ================= 实例列表 ================= */
 let instItems = [], acctItems = [];
@@ -1445,13 +1493,19 @@ function fmtBytes(b) {
   return b.toFixed(2) + " " + u[i];
 }
 function drawChart(points) {
+  window.__trafPoints = points;   // 记录最近数据,主题切换时重绘
   const cv = $("#trafCanvas"), ctx = cv.getContext("2d");
+  const cs = getComputedStyle(document.documentElement);
+  const cGrid = (cs.getPropertyValue("--grid-line") || "#1c2532").trim();
+  const cLabel = (cs.getPropertyValue("--muted") || "#8296ab").trim();
+  const cUp = (cs.getPropertyValue("--cyan") || "#22d3ee").trim();
+  const cDn = (cs.getPropertyValue("--green") || "#22c55e").trim();
   const dpr = devicePixelRatio || 1;
   const W = cv.width = cv.clientWidth * dpr, H = cv.height = 260 * dpr;
   ctx.clearRect(0, 0, W, H);
   const padL = 56 * dpr, padB = 30 * dpr, padT = 14 * dpr;
   const maxV = Math.max(1, ...points.map(p => Math.max(p.down, p.up)));
-  ctx.strokeStyle = "#1c2532"; ctx.fillStyle = "#8296ab";
+  ctx.strokeStyle = cGrid; ctx.fillStyle = cLabel;
   ctx.font = `${11 * dpr}px system-ui`;
   for (let g = 0; g <= 4; g++) {
     const y = padT + (H - padT - padB) * g / 4;
@@ -1459,7 +1513,7 @@ function drawChart(points) {
     ctx.fillText(fmtBytes(maxV * (4 - g) / 4), 6, y - 3);
   }
   if (!points.length) {
-    ctx.fillStyle = "#8296ab"; ctx.textAlign = "center";
+    ctx.fillStyle = cLabel; ctx.textAlign = "center";
     ctx.fillText("暂无监控数据", W / 2, H / 2); return;
   }
   const n = points.length, group = (W - padL - 10) / n;
@@ -1469,10 +1523,10 @@ function drawChart(points) {
     const x0 = padL + k * group + (group - bw * 2) / 2;
     const hUp = (H - padT - padB) * (p.up / maxV);
     const hDn = (H - padT - padB) * (p.down / maxV);
-    ctx.fillStyle = "#22d3ee"; ctx.fillRect(x0, H - padB - hUp, bw, hUp);
-    ctx.fillStyle = "#22c55e"; ctx.fillRect(x0 + bw, H - padB - hDn, bw, hDn);
+    ctx.fillStyle = cUp; ctx.fillRect(x0, H - padB - hUp, bw, hUp);
+    ctx.fillStyle = cDn; ctx.fillRect(x0 + bw, H - padB - hDn, bw, hDn);
     if (k % step === 0) {
-      ctx.fillStyle = "#8296ab";
+      ctx.fillStyle = cLabel;
       const t = new Date(p.t);
       const lbl = trafHours > 168 ? `${t.getMonth() + 1}/${t.getDate()}` : `${String(t.getHours()).padStart(2, "0")}:00`;
       ctx.fillText(lbl, x0, H - 8);
@@ -1874,7 +1928,7 @@ async function sshEnsureTerm() {
   try {
     if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") await loadXterm();
     sshTerm = new Terminal({ cursorBlink:true, fontSize:13, fontFamily:'ui-monospace,Consolas,monospace',
-      theme:{ background:"#0a0f15", foreground:"#dbe4ee", cursor:"#4f8cff" } });
+      theme: termTheme() });
     sshFit = new FitAddon.FitAddon();
     sshTerm.loadAddon(sshFit);
     sshTerm.open(document.getElementById("ssh-term"));
