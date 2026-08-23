@@ -101,16 +101,27 @@
 
 ## 🚀 快速开始
 
-### 方式一:Docker(推荐)
+### 方式一:预构建镜像(最简)
 
 ```bash
-git clone <本项目> && cd oci-panel
+docker run -d --name oci-panel -p 8080:8080 \
+  -e PANEL_PASSWORD=yourpassword -v ./data:/app/data \
+  ghcr.io/xiaoli8571/oci-panel:latest
+```
+
+> 若提示 manifest 不可见,请到 GitHub → 你的头像 → Packages → oci-panel → Package settings 改为 Public;
+> 或继续用下面的 compose 自建。
+
+### 方式二:Docker Compose 自建
+
+```bash
+git clone https://github.com/xiaoli8571/oci-panel.git && cd oci-panel
 PANEL_PASSWORD=yourpassword docker compose up -d
 ```
 
 浏览器访问 `http://服务器IP:8080`。
 
-### 方式二:本地运行
+### 方式三:本地运行
 
 ```bash
 pip install -r requirements.txt
@@ -119,7 +130,7 @@ PANEL_PASSWORD=yourpassword python -m uvicorn app.main:app --host 0.0.0.0 --port
 
 > 若不设置 `PANEL_PASSWORD`,首次启动会自动生成随机密码并打印在日志中,请及时查看并修改。
 
-### 方式三:服务器常驻(systemd)
+### 方式四:服务器常驻(systemd)
 
 ```bash
 # 已在目标服务器 /opt/oci-panel 部署时可使用 systemd 管理
