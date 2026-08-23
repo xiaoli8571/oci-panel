@@ -2751,46 +2751,65 @@ async function loadA1() {
   box.innerHTML = '<p class="hint">🩺 正在体检(扫描各账户配额与 A1 实例)…</p>';
   try {
     const d = await api("/api/a1-check");
-    box.innerHTML = (d.items || []).map(a => {
-      if (!a.ok) return `<div class="qcard"><b>${esc(a.name)}</b> <span class="badge b-err">查询失败</span><p class="hint">${esc(a.error || "")}</p></div>`;
+    let html = "";
+    for (const a of (d.items || [])) {
+      if (!a.ok) {
+        html += '<div class="qcard"><b>' + esc(a.name) + '</b> <span class="badge b-err">查询失败</span><p class="hint">' + esc(a.error || "") + '</p></div>';
+        continue;
+      }
       const pm = a.payment_model === "FREE_TIER" ? '<span class="badge b-run">免费层</span>'
                : a.payment_model === "PAYG" ? '<span class="badge b-info">PAYG</span>' : "";
-      const adRows = (a.ads || []).map(x => {
-        const c = x.core_avail ?? "-", m = x.mem_avail ?? "-";
-        const tight = (typeof x.core_avail === "number" && x.core_avail <= 0);
-        const can2c = x.can_a1_2c12g ?? "-", canE2 = x.can_e2_micro ?? "-";
-        return `<tr><td>${esc(x.ad)}</td>
-          <td><b style="color:${tight ? "var(--red)" : "var(--green)"}">${c}</b> 核 / <b>${m}</b> GB 可用
-              <span class="hint">(已用 ${x.core_used ?? "-"} 核 / ${x.mem_used ?? "-"} GB)</span>
-              · 还能开 <b style="color:var(--cyan)">${can2c}</b> 台 A1(2C/12G)、<b style="color:var(--purple)">${canE2}</b> 台 E2.Micro</td></tr>`;
-      }).join("") || `<tr><td colspan="2" class="hint">未取到限额数据</td></tr>`;
-      const ins = (a.instances || []).map(i => `<tr>
-          <td><b>${esc(i.name)}</b></td>
-          <td>${badge(i.state)}</td>
-          <td>${i.ocpus ?? "-"}C/${i.mem_gbs ?? "-"}G @${esc(i.ad || "-")}</td>
-          <td>${i.public_ip ? esc(i.public_ip) : "-"}</td>
-          <td><div class="ops">
-            <button class="btn-ghost" onclick="a1Resize(${a.account_id},'${esc(i.id)}',${i.name ? `'${esc(i.name)}'` : "''"},1,6)">降至1C/6G</button>
-            <button class="btn-ghost" onclick="a1Resize(${a.account_id},'${esc(i.id)}','${esc(i.name)}',2,12)">降至2C/12G</button>
-          </div></td></tr>`).join("")
-        : `<tr><td colspan="5" class="empty">该账户暂无 A1.Flex 实例</td></tr>`;
-      return `<div style="margin-bottom:14px">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-          <b>${esc(a.name)}</b> <span class="badge b-info">${esc(a.region)}</span> ${pm}
-        </div>
-        <div class="tblwrap mini-tbl"><table style="min-width:0"><thead><tr><th>可用域</th><th>A1 余量</th></tr></thead><tbody>${adRows}</tbody></table></div>
-        <div class="tblwrap mini-tbl" style="margin-top:8px"><table style="min-width:0"><thead><tr><th>A1 实例</th><th>状态</th><th>规格</th><th>公网IP</th><th>降配(需先关机)</th></tr></thead><tbody>${ins}</tbody></table></div>
-      </div>`;
-    }).join("") || '<p class="empty">没有 OCI 账户</p>';
-  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--red)">检测失败:${esc(e.message)}</p>`; }
+      let adRows = "";
+      for (const x of (a.ads || [])) {
+        const c = x.core_avail ?? "-";
+        const m = x.mem_avail ?? "-";
+        const tight = typeof x.core_avail === "number" && x.core_avail <= 0;
+        const can2c = x.can_a1_2c12g ?? "-";
+        const canE2 = x.can_e2_micro ?? "-";
+        adRows += '<tr><td>' + esc(x.ad) + '</td><td><b style="color:' + (tight ? "var(--red)" : "var(--green)") + '">' + c
+                + '</b> 核 / <b>' + m + '</b> GB 可用 <span class="hint">(已用 ' + (x.core_used ?? "-") + ' 核 / '
+                + (x.mem_used ?? "-") + ' GB)</span> · 还能开 <b style="color:var(--cyan)">' + can2c
+                + '</b> 台 A1(2C/12G)、<b style="color:var(--purple)">' + canE2 + '</b> 台 E2.Micro</td></tr>';
+      }
+      if (!adRows) adRows = '<tr><td colspan="2" class="hint">未取到限额数据</td></tr>';
+      let insRows = "";
+      for (const i of (a.instances || [])) {
+        insRows += '<tr><td><b>' + esc(i.name) + '</b></td>'
+                 + '<td>' + badge(i.state) + '</td>'
+                 + '<td>' + (i.ocpus ?? "-") + 'C/' + (i.mem_gbs ?? "-") + 'G @' + esc(i.ad || "-") + '</td>'
+                 + '<td>' + (i.public_ip ? esc(i.public_ip) : "-") + '</td>'
+                 + '<td><div class="ops">'
+                 + '<button class="btn-ghost" data-act="a1r" data-acct="' + a.account_id + '" data-iid="' + esc(i.id) + '" data-name="' + esc(i.name) + '" data-c="' + (1) + '" data-m="' + (6) + '">降至1C/6G</button>'
+                 + '<button class="btn-ghost" data-act="a1r" data-acct="' + a.account_id + '" data-iid="' + esc(i.id) + '" data-name="' + esc(i.name) + '" data-c="' + (2) + '" data-m="' + (12) + '">降至2C/12G</button>'
+                 + '</div></td></tr>';
+      }
+      if (!insRows) insRows = '<tr><td colspan="5" class="empty">该账户暂无 A1.Flex 实例</td></tr>';
+      html += '<div style="margin-bottom:14px">'
+            + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><b>' + esc(a.name)
+            + '</b> <span class="badge b-info">' + esc(a.region) + '</span> ' + pm + '</div>'
+            + '<div class="tblwrap mini-tbl"><table style="min-width:0"><thead><tr><th>可用域</th><th>A1 余量(可开机器数)</th></tr></thead><tbody>'
+            + adRows + '</tbody></table></div>'
+            + '<div class="tblwrap mini-tbl" style="margin-top:8px"><table style="min-width:0"><thead><tr><th>A1 实例</th><th>状态</th><th>规格</th><th>公网IP</th><th>降配(需先关机)</th></tr></thead><tbody>'
+            + insRows + '</tbody></table></div></div>';
+    }
+    box.innerHTML = html || '<p class="empty">没有 OCI 账户</p>';
+  } catch (e) { box.innerHTML = '<p class="hint" style="color:var(--red)">检测失败:' + esc(e.message) + '</p>'; }
 }
+
+/* A1 降配按钮(事件委托,避免模板内嵌复杂 JS) */
+document.addEventListener("click", function(ev) {
+  const t = ev.target && ev.target.closest ? ev.target.closest('button[data-act="a1r"]') : null;
+  if (!t) return;
+  a1Resize(+t.dataset.acct, t.dataset.iid, t.dataset.name, +t.dataset.c, +t.dataset.m);
+});
+
 async function a1Resize(accountId, instanceId, name, ocpus, mem) {
-  if (!confirm(`确定把「${name}」降到 ${ocpus}核/${mem}GB?
-注意:A1.Flex 修改规格需实例处于停止状态;运行中的实例会被 OCI 拒绝。`)) return;
+  const label = name || instanceId.slice(-8);
+  if (!confirm("确定把「" + label + "」降到 " + ocpus + "核/" + mem + "GB?\n注意:A1.Flex 修改规格需实例处于停止状态;运行中的实例会被 OCI 拒绝。")) return;
   try {
     await api("/api/instances/resize", { method: "POST", body: JSON.stringify({
-      account_id: accountId, instance_id: instanceId, ocpus, mem_gbs: mem }) });
-    toast(`✅ ${name} 已提交降配为 ${ocpus}C/${mem}G`, "ok");
+      account_id: accountId, instance_id: instanceId, ocpus: ocpus, mem_gbs: mem }) });
+    toast("✅ " + label + " 已提交降配为 " + ocpus + "C/" + mem + "G", "ok");
     setTimeout(loadA1, 1500);
   } catch (e) { toast(e.message, "err"); }
 }
