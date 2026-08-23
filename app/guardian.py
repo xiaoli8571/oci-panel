@@ -222,7 +222,37 @@ def run_once() -> dict:
     return stats
 
 
+def check_domains() -> dict:
+    """执行一轮域名/SSL 到期检查,命中阈值档位时写事件+通知(每域名每档位每天最多提醒一次)。"""
+    from . import domain_monitor
+    items = domain_monitor.list_domains()
+    if not items:
+        return {"checked": 0, "alerts": []}
+    results = domain_monitor.check_all()
+    today = dt.date.today().isoformat()
+    alerts = []
+    for r in results:
+        lvl = r.get("alert_level")
+        if lvl is None:
+            continue
+        name = r["name"]
+        dedupe_key = f"domalert:{name}:{lvl}"
+        if database.get_kv(dedupe_key) == today:
+            continue
+        database.set_kv(dedupe_key, today)
+        parts = [f"「{name}」"]
+        if isinstance(r.get("ssl_days_left"), int):
+            parts.append(f"SSL 证书剩余 {r['ssl_days_left']} 天(到期 {r.get('ssl_expires')})")
+        if isinstance(r.get("domain_days_left"), int):
+            parts.append(f"域名注册剩余 {r['domain_days_left']} 天(到期 {r.get('domain_expires')})")
+        msg = ",".join(parts) + ",请及时处理"
+        _record_event(None, "domain", msg, notify=True, dedupe_minutes=20 * 60)
+        alerts.append({"name": name, "level": lvl})
+    return {"checked": len(results), "alerts": alerts}
+
+
 def _loop():
+    last_domain_check = 0.0
     while True:
         try:
             s = run_once()
@@ -230,6 +260,15 @@ def _loop():
                 log.info("巡检完成:%s", s)
         except Exception:  # noqa: BLE001
             log.error("巡检异常:%s", traceback.format_exc())
+        # 域名/SSL 到期检查:每 6 小时一轮(告警档位内每日去重)
+        if time.time() - last_domain_check >= 6 * 3600:
+            last_domain_check = time.time()
+            try:
+                r = check_domains()
+                if r["alerts"]:
+                    log.info("域名告警:%s", r["alerts"])
+            except Exception:  # noqa: BLE001
+                log.error("域名检查异常:%s", traceback.format_exc())
         time.sleep(INTERVAL)
 
 

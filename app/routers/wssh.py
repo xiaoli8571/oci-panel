@@ -25,17 +25,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .. import config, security
 from ..database import db
 from ..pcreds import ProviderError
-from ..routers.vps import _creds, _get_row, _cred_key
-
-
-def _lookup_saved_cred(username: str, host: str, port: int):
-    """从凭据库取明文凭据;返回 (auth_type, secret) 或 None。"""
-    k = _cred_key(username, host, port)
-    with db() as c:
-        row = c.execute("SELECT auth_type,secret_enc FROM ssh_creds WHERE cred_key=?", (k,)).fetchone()
-    if not row or not row["secret_enc"]:
-        return None
-    return (row["auth_type"] or "password"), security.decrypt(row["secret_enc"])
+from ..routers.vps import _creds, _get_row, _cred_key, _lookup_saved_cred
 
 
 log = logging.getLogger("wssh")

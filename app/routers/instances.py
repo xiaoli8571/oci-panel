@@ -149,9 +149,33 @@ def instance_op(body: OpReq):
 def change_ip(body: ChangeIpReq):
     acct = _get_account(body.account_id)
     _invalidate_cache(body.account_id)
-    job = jobs.start_job(
-        "change_ip", oci_client.change_public_ip, acct, body.compartment_id, body.instance_id
-    )
+
+    dns = body.dns_update
+    if dns:
+        # 换 IP 后自动更新 Cloudflare A 记录(R探长同款联动)
+        from .. import cloudflare as cfmod
+
+        def _with_dns(progress, acct=acct, cid=body.compartment_id, iid=body.instance_id,
+                      dns=dns):
+            res = oci_client.change_public_ip(progress, acct, cid, iid)
+            new_ip = res.get("new_ip")
+            if not new_ip:
+                progress("⚠ 未获取到新 IP,跳过 DNS 更新")
+                return res
+            try:
+                cf_acct = _get_account(dns.cf_account_id)
+                r = cfmod.upsert_a_record(cf_acct, dns.zone, dns.record_name, new_ip,
+                                          proxied=dns.proxied)
+                progress(f"✅ DNS 已更新:{r['name']} → {new_ip}({r['action']})")
+            except Exception as e:  # noqa: BLE001
+                progress(f"⚠ DNS 更新失败:{e}")
+            return res
+
+        job = jobs.start_job("change_ip_dns", _with_dns)
+    else:
+        job = jobs.start_job(
+            "change_ip", oci_client.change_public_ip, acct, body.compartment_id, body.instance_id
+        )
     return {"job_id": job["id"]}
 
 

@@ -166,6 +166,16 @@ def _cred_key(username: str, host: str, port: int) -> str:
     return f"{username}@{host}:{int(port or 22)}"
 
 
+def _lookup_saved_cred(username: str, host: str, port: int):
+    """从凭据库取明文凭据;返回 (auth_type, secret) 或 None。"""
+    k = _cred_key(username, host, port)
+    with db() as c:
+        row = c.execute("SELECT auth_type,secret_enc FROM ssh_creds WHERE cred_key=?", (k,)).fetchone()
+    if not row or not row["secret_enc"]:
+        return None
+    return (row["auth_type"] or "password"), security.decrypt(row["secret_enc"])
+
+
 @router.get("/saved-cred")
 def get_saved_cred(u: str, h: str, p: int = 22):
     """返回某主机已保存的凭据(明文,仅登录会话可取;前端填表用)。"""
@@ -212,6 +222,90 @@ def list_saved_creds():
     with db() as c:
         rows = c.execute("SELECT cred_key,username,host,port,auth_type FROM ssh_creds ORDER BY host").fetchall()
     return {"items": [dict(r) for r in rows]}
+
+
+# ---------- SSH 批量命令(多主机并行执行,R探长同款能力) ----------
+
+def _resolve_target(t: dict) -> dict:
+    """把目标解析为 asyncssh 连接参数。支持 vps_id / cred_key / host+username(凭据库)。"""
+    if t.get("vps_id"):
+        row = _get_row(int(t["vps_id"]))
+        _, kw = _creds(row)
+        return {"label": row["name"], "host": row["host"], "kw": kw}
+    if t.get("cred_key") or (t.get("username") and t.get("host")):
+        import asyncssh as _a
+        if t.get("cred_key"):
+            k = str(t["cred_key"])
+            try:
+                username, rest = k.split("@", 1)
+                host, port_s = rest.rsplit(":", 1)
+                port = int(port_s)
+            except ValueError:
+                raise ProviderError(f"凭据键格式错误:{k}")
+        else:
+            host, port, username = str(t["host"]), int(t.get("port", 22)), str(t["username"])
+        saved = _lookup_saved_cred(username, host, port)
+        if not saved:
+            raise ProviderError(f"{username}@{host}:{port} 没有保存的凭据")
+        auth_t, sec = saved
+        kw: dict = dict(port=port, username=username, known_hosts=None)
+        if auth_t == "key":
+            kw["client_keys"] = [_a.import_private_key(sec)]
+        else:
+            kw["password"] = sec
+        return {"label": f"{username}@{host}", "host": host, "kw": kw}
+    raise ProviderError("目标缺少可用的连接方式(vps_id / cred_key / host+username)")
+
+
+@router.post("/batch-cmd")
+async def batch_cmd(body: dict):
+    """多主机并行执行命令。
+
+    body: {targets:[{vps_id}|{cred_key}|{host,port,username}], cmd:str, timeout:int=30}
+    返回 {items:[{target,label,ok,exit_code,output,error,ms}]}(单机输出截断 8KB)。
+    """
+    cmd = str(body.get("cmd") or "").strip()
+    if not cmd:
+        raise HTTPException(400, "请填写要执行的命令")
+    targets = body.get("targets") or []
+    if not targets or len(targets) > 50:
+        raise HTTPException(400, "目标数量需在 1~50 之间")
+    timeout = min(int(body.get("timeout") or 30), 120)
+
+    resolved: list[dict] = []
+    errors: list[dict] = []
+    for t in targets:
+        label0 = t.get("cred_key") or t.get("host") or f"vps-{t.get('vps_id')}"
+        try:
+            resolved.append(_resolve_target(dict(t)))
+        except Exception as e:  # noqa: BLE001
+            errors.append({"target": label0, "label": label0, "ok": False,
+                           "error": f"解析失败:{e}", "output": ""})
+
+    async def _run_one(tg: dict) -> dict:
+        t0 = time.time()
+        conn = None
+        try:
+            conn = await asyncio.wait_for(
+                asyncssh.connect(tg["host"], **tg["kw"]), timeout=15)
+            res = await asyncio.wait_for(conn.run(cmd), timeout=timeout)
+            out = (res.stdout or "") + (("\n[stderr] " + res.stderr) if res.stderr else "")
+            return {
+                "target": tg["host"], "label": tg["label"], "ok": True,
+                "exit_code": res.exit_status,
+                "output": out[:8192],
+                "ms": int((time.time() - t0) * 1000),
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"target": tg["host"], "label": tg["label"], "ok": False,
+                    "output": "", "error": f"{type(e).__name__}: {e}"[:160],
+                    "ms": int((time.time() - t0) * 1000)}
+        finally:
+            if conn:
+                conn.close()
+
+    results = list(await asyncio.gather(*[_run_one(t) for t in resolved]))
+    return {"items": results + errors}
 
 
 # ---------- 实例列表合并用的行构造 ----------

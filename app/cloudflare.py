@@ -135,6 +135,48 @@ def delete_record(acct: dict, zone_id: str, record_id: str) -> dict:
     return cf(acct, "DELETE", f"/zones/{zone_id}/dns_records/{record_id}")
 
 
+# ---------------------------------------------------------------- 换IP自动DNS联动
+
+def upsert_a_record(acct: dict, zone_name_or_id: str, name: str, ip: str,
+                    proxied: bool = False, ttl: int = 300) -> dict:
+    """把 name 的 A 记录指向 ip:已有同名 A 记录则更新第一条,否则创建。
+
+    zone_name_or_id 可传 zone_id 或域名(zone name);传域名时自动匹配 Token 可见的 zone。
+    返回 {zone_id, record_id, action: created|updated}。
+    """
+    zone_id = zone_name_or_id
+    zone_name = ""
+    if "." in zone_name_or_id and not zone_name_or_id.startswith("/"):
+        # 传的是域名:在 Token 可见的 zone 里精确匹配
+        zname = zone_name_or_id.lower().rstrip(".")
+        matched = [z for z in zones(acct) if z["name"].lower() == zname]
+        if not matched:
+            raise ProviderError(f"Cloudflare 中未找到域名 {zname}(请检查 Token 权限)")
+        zone_id = matched[0]["id"]
+        zone_name = matched[0]["name"]
+
+    recs = records(acct, zone_id)
+    base = (zone_name or "").lower()
+    nm = name.strip().lower()
+    if nm in ("@", "", base):
+        fqdn = base
+    elif nm.endswith("." + base):
+        fqdn = nm
+    else:
+        fqdn = f"{nm}.{base}" if base else nm
+
+    a_recs = [r for r in recs if r["type"] == "A" and r["name"].lower() == fqdn]
+    if a_recs:
+        rid = a_recs[0]["record_id"]
+        update_record(acct, zone_id, rid,
+                      {"type": "A", "name": a_recs[0]["name"], "content": ip,
+                       "ttl": ttl or a_recs[0].get("ttl") or 300, "proxied": proxied})
+        return {"zone_id": zone_id, "record_id": rid, "action": "updated", "name": fqdn}
+    new = create_record(acct, zone_id,
+                        {"type": "A", "name": fqdn, "content": ip, "ttl": ttl, "proxied": proxied})
+    return {"zone_id": zone_id, "record_id": new.get("id", ""), "action": "created", "name": fqdn}
+
+
 # ---------------------------------------------------------------- Workers
 
 def accounts_list(acct: dict) -> list[dict]:

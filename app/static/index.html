@@ -250,6 +250,7 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
       <div class="spacer"></div>
       <button onclick="openCreate()">＋ 创建实例</button>
       <button class="btn-purple" onclick="openVpsModal()">＋ 添加 VPS</button>
+      <button class="btn-cyan" onclick="openBatchCmd()">⚡ 批量命令</button>
     </div>
     <div class="tblwrap">
       <table id="instTable">
@@ -342,6 +343,17 @@ pre.log{background:#0a0f15;border:1px solid var(--line);border-radius:8px;paddin
     <div class="tblwrap"><table>
       <thead><tr><th>账户</th><th style="text-align:center">启用守护</th><th style="text-align:center">停机保活</th><th>月流量阈值(GB,0=不限)</th><th>超限动作</th><th>操作</th></tr></thead>
       <tbody id="guardRules"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div>
+    <div class="qcard" style="margin-top:14px">
+      <h4>🌐 域名 & SSL 证书到期监控 <span class="hint" style="font-weight:400">每 6 小时探测;剩余 ≤30/14/7/3/1 天分档推送提醒</span></h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <input id="dom-name" placeholder="域名,如 example.com" style="max-width:240px">
+        <input id="dom-host" placeholder="TLS 探测主机(默认同域名,可空)" style="max-width:240px">
+        <button onclick="addDomain()">＋ 添加</button>
+        <button class="btn-cyan" onclick="checkDomains(true)">⚡ 立即检测</button>
+      </div>
+      <div id="domTable"><p class="empty">加载中…</p></div>
+      <p class="hint">域名到期经 RDAP 查询(部分后缀可能不支持);SSL 到期直接读取 443 端口证书。命中阈值会写入事件并推送 Telegram/Webhook。</p>
+    </div>
     <div class="qcard" style="margin-top:14px"><h4>最近事件</h4><div id="guardEvents"><p class="empty">加载中…</p></div></div>
   </section>
 
@@ -623,6 +635,29 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
   </div>
 </div>
 
+<!-- SSH 批量命令 -->
+<div class="mask" id="batchModal">
+  <div class="modal wide">
+    <h3>⚡ SSH 批量命令</h3>
+    <p class="sub">对多台主机并行执行同一条命令(使用面板保存的凭据;输出截断 8KB/台)</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <button class="btn-ghost btn-sm" onclick="batchSelAll(1)">全选</button>
+      <button class="btn-ghost btn-sm" onclick="batchSelAll(0)">全不选</button>
+      <span class="hint" id="batchCount">0 台已选</span>
+    </div>
+    <div id="batchHosts" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
+      <p class="empty">加载中…</p></div>
+    <label>命令(支持 sudo 的主机可直接写 reboot 等)</label>
+    <input id="batch-cmd" placeholder="如:uptime / df -h / free -m" style="font-family:ui-monospace,Consolas,monospace">
+    <div class="foot">
+      <span class="hint">超时 <input id="batch-timeout" type="number" value="30" min="5" max="120" style="width:70px;display:inline-block"> 秒</span>
+      <button class="btn-ghost" onclick="hide('batchModal')">关闭</button>
+      <button onclick="runBatchCmd()">▶ 并行执行</button>
+    </div>
+    <div id="batchResult" style="margin-top:12px"></div>
+  </div>
+</div>
+
 <!-- 磁盘管理 -->
 <div class="mask" id="volModal">
   <div class="modal">
@@ -834,7 +869,7 @@ function showTab(t) {
   TABS.forEach(x => { const el = $("#tab-" + x); if (el) el.hidden = x !== t;
     const b = $("#nav-" + x); b && b.classList.toggle("active", x === t); });
   if (t === "inst" && $("#quotaBody").querySelector(".hint")) loadQuota();
-  if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); }
+  if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); loadDomains(); }
   if (t === "cloud") initCloudTab();
 }
 
@@ -1211,8 +1246,30 @@ async function renderNet() {
 function netBody() { return { account_id: curNet.account_id, compartment_id: curNet.compartment_id, instance_id: curNet.id }; }
 async function doChangeIp() {
   if (!confirm(`更换「${curNet.name}」的临时公网 IP?\n运行中会先软关机再开机,服务中断约 1~3 分钟。`)) return;
+  // 可选:Cloudflare DNS 联动(格式:域名 记录名,如 example.com panel;留空跳过)
+  let dnsBody = null;
+  const dnsInput = prompt(
+    "可选:换 IP 后自动更新 Cloudflare DNS A 记录\n" +
+    "格式:域名 记录名(如:example.com panel;记录名 @ 表示根域)\n" +
+    "(需已在面板添加 Cloudflare 账户;留空直接确定 = 不联动)", "");
+  if (dnsInput && dnsInput.trim()) {
+    const parts = dnsInput.trim().split(/\s+/);
+    if (parts.length !== 2) return toast("DNS 联动格式应为:域名 记录名", "err");
+    try {
+      const cfs = (await api("/api/accounts")).items.filter(a => (a.provider || "oci") === "cloudflare");
+      if (!cfs.length) return toast("请先在「账户」页添加 Cloudflare 账户", "err");
+      let cfId = cfs[0].id;
+      if (cfs.length > 1) {
+        const pick = prompt(`有 ${cfs.length} 个 Cloudflare 账户,使用哪一个?\n` +
+          cfs.map((a, i) => `${i + 1}. ${a.name}`).join("\n") + "\n输入序号(默认 1):", "1");
+        cfId = cfs[(+pick || 1) - 1].id;
+      }
+      dnsBody = { cf_account_id: cfId, zone: parts[0], record_name: parts[1] === "@" ? parts[0] : parts[1] };
+    } catch (e) { return toast(e.message, "err"); }
+  }
   try {
-    const d = await api("/api/instances/change-ip", { method: "POST", body: JSON.stringify(netBody()) });
+    const d = await api("/api/instances/change-ip", { method: "POST",
+      body: JSON.stringify({ ...netBody(), ...(dnsBody ? { dns_update: dnsBody } : {}) }) });
     hide("netModal"); openJob("更换公网 IP · " + curNet.name, d.job_id);
   } catch (e) { toast(e.message, "err"); }
 }
@@ -1564,6 +1621,120 @@ async function loadGuardEvents() {
 async function runGuardOnce() {
   try { const d = await api("/api/guardian/run", { method: "POST" }); openJob("手动巡检", d.job_id); }
   catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- 域名 & SSL 到期监控 ---- */
+let domLastReport = null;
+async function loadDomains() {
+  const box = $("#domTable");
+  try {
+    const [d, rep] = await Promise.all([
+      api("/api/guardian/domains"),
+      domLastReport ? Promise.resolve(domLastReport) : Promise.resolve(null),
+    ]);
+    if (!d.items.length) { box.innerHTML = `<p class="empty">尚未添加监控域名</p>`; return; }
+    box.innerHTML = `<table style="min-width:0"><thead><tr>
+      <th>域名</th><th>SSL 到期</th><th>域名注册到期</th><th>注册商</th><th>状态</th><th>操作</th></tr></thead><tbody>` +
+      d.items.map(it => {
+        const r = rep ? (rep.find(x => x.name === it.name) || {}) : {};
+        const ssl = r.ssl_days_left != null ? `${r.ssl_expires}(${r.ssl_days_left}天)` :
+                    (r.ssl_error ? `⚠ ${esc(r.ssl_error)}` : "未检测");
+        const dom = r.domain_days_left != null ? `${r.domain_expires}(${r.domain_days_left}天)` :
+                    (r.rdap_error ? `⚠ ${esc(r.rdap_error)}` : "未检测");
+        let badge = `<span class="badge b-run">正常</span>`;
+        if (r.alert_level != null) {
+          const cls = r.alert_level <= 7 ? "b-err" : "b-busy";
+          badge = `<span class="badge ${cls}">⚠ ≤${r.alert_level} 天</span>`;
+        } else if (rep && r.min_days_left == null) {
+          badge = `<span class="badge b-stop">未检出</span>`;
+        }
+        return `<tr><td><b>${esc(it.name)}</b>${it.note ? `<br><span class="hint">${esc(it.note)}</span>` : ""}</td>
+          <td>${ssl}</td><td>${dom}</td><td>${esc(r.registrar || "-")}</td>
+          <td>${badge}</td>
+          <td><button class="btn-red" onclick="delDomain('${esc(it.name)}')">删除</button></td></tr>`;
+      }).join("") + `</tbody></table>`;
+  } catch (e) { box.innerHTML = `<p class="empty">加载失败:${esc(e.message)}</p>`; }
+}
+async function addDomain() {
+  const name = $("#dom-name").value.trim();
+  if (!name || !name.includes(".")) return toast("请填写有效域名", "err");
+  try {
+    await api("/api/guardian/domains", { method: "POST", body: JSON.stringify({
+      name, host: $("#dom-host").value.trim(), note: "" }) });
+    $("#dom-name").value = ""; $("#dom-host").value = "";
+    toast("已添加监控", "ok"); loadDomains(); loadGuardEvents();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function delDomain(name) {
+  if (!confirm(`删除对 ${name} 的监控?`)) return;
+  try { await api(`/api/guardian/domains?name=${encodeURIComponent(name)}`, { method: "DELETE" });
+    toast("已删除", "ok"); loadDomains(); } catch (e) { toast(e.message, "err"); }
+}
+async function checkDomains(notify) {
+  try {
+    const d = await api("/api/guardian/domains/check", { method: "POST" });
+    domLastReport = d.items || [];
+    await loadDomains();
+    if (notify) toast(`已检测 ${d.checked} 个域名`, d.checked ? "ok" : "err");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- SSH 批量命令 ---- */
+let batchTargets = [];   // {vps_id?, cred_key?, host?, username?, label}
+async function openBatchCmd() {
+  show("batchModal");
+  $("#batchResult").innerHTML = "";
+  const box = $("#batchHosts");
+  box.innerHTML = `<p class="empty">加载中…</p>`;
+  batchTargets = [];
+  try {
+    // 候选:手动 VPS + 凭据库(云实例若保存过凭据也在凭据库里)
+    const [vpsd, credsd] = await Promise.all([
+      api("/api/vps"), api("/api/vps/saved-cred/list")]);
+    const vpsItems = vpsd.items || [], credItems = credsd.items || [];
+    const rows = [];
+    for (const v of vpsItems)
+      rows.push({ sel: true, label: `${esc(v.name)}(${v.username}@${v.host})`,
+                  target: { vps_id: v.id } });
+    for (const c of credItems) {
+      if (vpsItems.some(v => v.host === c.host && v.port === c.port)) continue; // 已列出不重复
+      rows.push({ sel: true, label: `${esc(c.cred_key)}(凭据库)`, target: { cred_key: c.cred_key } });
+    }
+    batchTargets = rows;
+    box.innerHTML = rows.length ? rows.map((r, i) => `<label style="display:flex;gap:8px;align-items:center;margin:4px 0;color:var(--text);font-size:13px">
+        <input type="checkbox" class="batch-chk" data-i="${i}" ${r.sel ? "checked" : ""} style="width:auto" onchange="batchCount()">
+        <span>${r.label}</span></label>`).join("")
+      : `<p class="empty">没有候选主机:请先「添加 VPS」或对任意主机保存过 SSH 凭据</p>`;
+    batchCount();
+  } catch (e) { box.innerHTML = `<p class="empty">加载失败:${esc(e.message)}</p>`; }
+}
+function batchSelAll(v) {
+  document.querySelectorAll(".batch-chk").forEach(c => c.checked = !!v);
+  batchCount();
+}
+function batchCount() {
+  const n = [...document.querySelectorAll(".batch-chk")].filter(c => c.checked).length;
+  $("#batchCount").textContent = n + " 台已选";
+}
+async function runBatchCmd() {
+  const cmd = $("#batch-cmd").value.trim();
+  if (!cmd) return toast("请填写命令", "err");
+  const targets = batchTargets.filter((_, i) =>
+    document.querySelector(`.batch-chk[data-i="${i}"]`)?.checked).map(r => r.target);
+  if (!targets.length) return toast("请至少勾选一台主机", "err");
+  const timeout = Math.min(Math.max(+$("#batch-timeout").value || 30, 5), 120);
+  $("#batchResult").innerHTML = `<p class="empty">⏳ 正在对 ${targets.length} 台主机并行执行…</p>`;
+  try {
+    const d = await api("/api/vps/batch-cmd", { method: "POST",
+      body: JSON.stringify({ targets, cmd, timeout }) });
+    $("#batchResult").innerHTML = (d.items || []).map(r => `
+      <div class="qcard" style="padding:10px 14px;margin-bottom:10px">
+        <h4 style="margin-bottom:6px">${r.ok ? "✅" : "❌"} <span class="ip">${esc(r.label || r.target)}</span>
+          ${r.ok ? `<span class="badge ${r.exit_code === 0 ? "b-run" : "b-busy"}">exit ${r.exit_code}</span> <span class="hint">${r.ms}ms</span>`
+                : `<span class="badge b-err">${esc(r.error || "失败")}</span>`}</h4>
+        ${r.output ? `<pre class="log" style="max-height:180px">${esc(r.output)}</pre>` : ""}
+      </div>`).join("") || `<p class="empty">无结果</p>`;
+  } catch (e) { $("#batchResult").innerHTML = `<p class="empty" style="color:var(--red)">执行失败:${esc(e.message)}</p>`; }
 }
 
 /* ================= 手动 VPS 管理 ================= */

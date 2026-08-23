@@ -1,7 +1,7 @@
-"""守护中心接口:规则 / 事件 / 通知设置 / 手动巡检。"""
+"""守护中心接口:规则 / 事件 / 通知设置 / 域名监控 / 手动巡检。"""
 from fastapi import APIRouter, HTTPException
 
-from .. import database, guardian, jobs
+from .. import database, domain_monitor, guardian, jobs
 from ..pcreds import ProviderError
 from ..schemas import GuardianRule, TgReq, WebhookReq
 
@@ -71,3 +71,34 @@ def tg_test():
     except ProviderError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- 域名 & SSL 到期监控
+
+@router.get("/domains")
+def domains_list():
+    return {"items": domain_monitor.list_domains()}
+
+
+@router.post("/domains")
+def domains_add(body: dict):
+    name = str(body.get("name") or "").strip()
+    if not name or "." not in name:
+        raise HTTPException(400, "请填写有效域名,如 example.com")
+    items = domain_monitor.add_domain(name, str(body.get("host") or ""),
+                                      str(body.get("note") or ""))
+    return {"items": items}
+
+
+@router.delete("/domains")
+def domains_remove(name: str):
+    return {"items": domain_monitor.remove_domain(name)}
+
+
+@router.post("/domains/check")
+def domains_check():
+    """立即探测全部域名,返回完整报告(不产生告警事件)。"""
+    if not domain_monitor.list_domains():
+        return {"items": [], "checked": 0}
+    results = domain_monitor.check_all()
+    return {"items": results, "checked": len(results)}

@@ -36,6 +36,19 @@ class ChangeIpReq(BaseModel):
     account_id: int
     compartment_id: str
     instance_id: str
+    # 可选:换 IP 完成后自动更新 Cloudflare DNS A 记录(R探长同款联动)
+    dns_update: "DnsUpdate | None" = None
+
+
+class DnsUpdate(BaseModel):
+    """换 IP 后 DNS 联动参数。cf_account_id 为面板中的 cloudflare 账户 id。"""
+    cf_account_id: int
+    zone: str = Field(min_length=1, max_length=255)          # 域名(zone name)或 zone_id
+    record_name: str = Field(min_length=1, max_length=255)   # 如 panel 或 @
+    proxied: bool = False
+
+
+ChangeIpReq.model_rebuild()
 
 
 class TrafficReq(BaseModel):
