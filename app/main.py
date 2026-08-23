@@ -8,7 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import audit, config, database, guardian, security, tgbot
+from . import audit, config, database, guardian, sched, security, tgbot
 from .oci_client import OciError
 from .pcreds import ProviderError
 from .routers import wssh as wssh_router
@@ -16,6 +16,7 @@ from .routers import multi as multi_router
 from .routers import accounts, auth, instances, resources, vps
 from .routers import guardian as guardian_router
 from .routers import oss as oss_router
+from .routers import sched as sched_router
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
@@ -27,6 +28,7 @@ generated_pw = security.init()
 database.init()
 audit.init()
 guardian.start()
+sched.start()   # 定时任务(每日定时开关机等)
 tgbot.start()   # Telegram Bot 指令控制(未启用时静默待机)
 
 if generated_pw:
@@ -47,6 +49,7 @@ app.include_router(guardian_router.router)
 app.include_router(wssh_router.router)
 app.include_router(multi_router.router)
 app.include_router(oss_router.router)
+app.include_router(sched_router.router)
 
 
 # ---- 登录守卫:保护所有 /api/*(除 login/status)与 /healthz ----

@@ -103,26 +103,36 @@ def _fmt_row(r: dict) -> str:
     return f"{state} {r['name']}{ip} [{r.get('state','?')}{spec}] @{r.get('region','-')}"
 
 
-def _power_op(row: dict, op_map: dict[str, str], label: str) -> str:
-    from .database import db
-    with db() as c:
-        acct_row = c.execute("SELECT * FROM accounts WHERE id=?", (row["account_id"],)).fetchone()
-    if not acct_row:
-        raise ProviderError("实例所属账户已被删除")
-    acct = dict(acct_row)
-    p = row.get("provider")
-    if p == "oci":
-        oci_client.instance_op(acct, row["compartment_id"], row["id"], op_map["oci"])
-    elif p == "aws":
-        if row.get("service") == "lightsail":
-            aws_cloud.lightsail_op(acct, row.get("region", ""), row["id"], op_map["aws_ls"])
-        else:
-            aws_cloud.instance_op(acct, row["id"], op_map["aws"])
-    else:
-        raise ProviderError("该类型暂不支持远程电源操作")
+def _power_op(row: dict, action: str) -> str:
+    """执行电源操作(委托共享模块 power.power_op)。action: start/stop/reboot"""
+    from . import power
+    label = power.power_op(row, action)
     with _snap_lock:
         _snap["ts"] = 0   # 操作后强制刷新缓存
     return f"✅ 已向「{row['name']}」下发{label}指令"
+
+
+def _cmd_stats(chat_id: str, arg: str) -> str:
+    """VPS 资源监控:/stats <名称>(仅支持手动添加且保存了凭据的 VPS 行)。"""
+    if not arg:
+        return "用法:/stats <VPS名称>"
+    rows = [r for r in _snapshot() if r.get("provider") == "vps"]
+    m, err = _resolve(rows, chat_id, arg)
+    if err or not m:
+        return err or "未找到该 VPS(资源监控仅支持手动添加的 VPS)"
+    r = m[0]
+    if not r.get("vps_id"):
+        return "⚠ 该行缺少 vps_id"
+    try:
+        from .routers.vps import collect_stats
+        s = collect_stats(int(r["vps_id"]))
+    except Exception as e:  # noqa: BLE001
+        return f"⚠ 采集失败:{e}"
+    return (f"📊 {r['name']}\n"
+            f"CPU:{s.get('cpu_pct','-')}%\n"
+            f"内存:{s.get('mem_used','-')}/{s.get('mem_total','-')}MB({s.get('mem_pct','-')}%)\n"
+            f"磁盘:{s.get('disk_used','-')}/{s.get('disk_total','-')}GB({s.get('disk_pct','-%')})\n"
+            f"运行:{s.get('uptime','-')}")
 
 
 def _resolve(rows: list[dict], chat_id: str, arg: str) -> tuple[list[dict] | None, str]:
@@ -162,6 +172,7 @@ def _cmd_help() -> str:
         "/open <名称|序号> <端口> — 开放 TCP 端口\n"
         "/quota — A1 配额余量\n"
         "/dom — 域名/SSL 到期监控\n"
+        "/stats <VPS名> — 资源监控(CPU/内存/磁盘)\n"
         "/guard — 守护规则状态\n"
         "/ping — 面板存活\n"
         "💡 名称支持模糊匹配;多台命中时会给出序号候选"
@@ -207,6 +218,8 @@ def _cmd_ip(arg: str) -> str:
 
 
 def _make_power_cmd(op_key: str, label: str):
+    action = {"on": "start", "off": "stop", "reboot": "reboot"}[op_key]
+
     def _run(chat_id: str, arg: str) -> str:
         if not arg:
             return f"用法:/{op_key} <名称|IP|序号>"
@@ -214,13 +227,8 @@ def _make_power_cmd(op_key: str, label: str):
         m, err = _resolve(rows, chat_id, arg)
         if err or not m:
             return err or "未找到实例"
-        op_maps = {
-            "on": {"oci": "START", "aws": "START", "aws_ls": "START"},
-            "off": {"oci": "SOFTSTOP", "aws": "STOP", "aws_ls": "STOP"},
-            "reboot": {"oci": "RESET", "aws": "REBOOT" if False else "RESET", "aws_ls": "REBOOT"},
-        }
         try:
-            msg = _power_op(m[0], op_maps[op_key], label)
+            msg = _power_op(m[0], action)
         except ProviderError as e:
             return f"⚠ {e}"
         except Exception as e:  # noqa: BLE001
@@ -358,6 +366,7 @@ _CMDS = {
     "/reboot": _make_power_cmd("reboot", "重启"),
     "/reip": lambda cid, arg: _run_reip(cid, arg),
     "/open": lambda cid, arg: _run_open(cid, arg),
+    "/stats": _cmd_stats,
     "/quota": lambda cid, arg: _cmd_quota(),
     "/dom": lambda cid, arg: _cmd_dom(),
     "/guard": lambda cid, arg: _cmd_guard(),

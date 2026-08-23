@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 import asyncssh
@@ -339,3 +340,141 @@ def list_vps_rows() -> list[dict]:
             "time_created": (h["created_at"] or "")[:16],
         })
     return rows_out
+
+
+# ---------- VPS 资源监控(单机采集) ----------
+
+_STATS_CMD = ("LANG=C top -bn1 | head -5; echo '---MEM---'; free -m | head -2; "
+              "echo '---DISK---'; df -P / | tail -1; echo '---UP---'; "
+              "uptime -p 2>/dev/null || uptime")
+
+
+def _parse_stats(out: str) -> dict:
+    cpu_pct = mem_pct = None
+    mem_total = mem_used = disk_total = disk_used = None
+    disk_pct = "-"
+    uptime = ""
+    section = "top"
+    for ln in out.splitlines():
+        if ln.startswith("---"):
+            section = {"---MEM---": "mem", "---DISK---": "disk", "---UP---": "up"}.get(ln.strip(), section)
+            continue
+        if "%Cpu(s):" in ln and cpu_pct is None:
+            try:
+                idle = None
+                for tok in ln.replace("%Cpu(s):", "").split(","):
+                    t = tok.strip().split()
+                    if len(t) == 2 and t[1] in ("id", "id,"):
+                        idle = float(t[0])
+                        break
+                if idle is None:
+                    # 某些 top 输出没有标签,取倒数第4个数值(id 通常在 wa 前)
+                    nums = [t for t in ln.replace("%", "").replace(":", ",").split(",")]
+                    vals = []
+                    for t in nums:
+                        p = t.strip().split()
+                        if p:
+                            try:
+                                vals.append(float(p[0]))
+                            except ValueError:
+                                pass
+                    if len(vals) >= 4:
+                        idle = vals[3]
+                if idle is not None:
+                    cpu_pct = round(max(0.0, min(100.0, 100.0 - idle)), 1)
+            except Exception:  # noqa: BLE001
+                pass
+        elif ln.startswith("Mem:") and mem_total is None:
+            try:
+                parts = ln.split()
+                mem_total, mem_used = int(parts[1]), int(parts[2])
+                avail = int(parts[-1]) if len(parts) >= 7 else None   # available 列
+                used = (mem_total - avail) if avail is not None and avail > 0 else mem_used
+                mem_pct = round(min(100.0, used * 100.0 / max(mem_total, 1)), 1)
+                mem_used = used
+            except Exception:  # noqa: BLE001
+                pass
+        elif section == "disk" and "%" in ln and disk_total is None:
+            try:
+                parts = ln.split()
+                # df -P 标准: FS 1K-blocks Used Available Capacity% Mounted
+                if len(parts) >= 5 and parts[1].isdigit():
+                    disk_total = round(int(parts[1]) / 1048576, 1)      # KB→GB
+                    disk_used = round(int(parts[2]) / 1048576, 1)
+                    disk_pct = parts[4]
+                else:
+                    # 兜底:human-readable(40G 8.2G 32G 21%)
+                    nums = [p for p in parts if p.endswith(("G", "M", "T")) or p.endswith("%")]
+                    if len(nums) >= 4:
+                        def to_gb(v):
+                            v = v[:-1]
+                            unit = {"G": 1, "M": 1/1024, "T": 1024}.get(v[-1] if False else "", 1)
+                            return v
+                        # 简化:直接取 G/T 数值,M 忽略精度
+                        def f(v):
+                            n = float(re.findall(r"([\d.]+)", v)[0])
+                            if v.endswith("T"): return round(n * 1024, 1)
+                            if v.endswith("M"): return round(n / 1024, 2)
+                            return round(n, 1)
+                        disk_total, disk_used = f(nums[0]), f(nums[1])
+                        disk_pct = nums[3]
+            except Exception:  # noqa: BLE001
+                pass
+        elif section == "up" and ln.strip() and not uptime:
+            uptime = ln.strip()
+    return {"cpu_pct": cpu_pct,
+            "mem_total": mem_total, "mem_used": mem_used, "mem_pct": mem_pct,
+            "disk_total": disk_total, "disk_used": disk_used, "disk_pct": disk_pct,
+            "uptime": uptime or "-"}
+
+
+async def collect_stats(vps_id: int) -> dict:
+    """连接 VPS 执行一条组合命令并解析资源占用。失败抛异常。"""
+    row = _get_row(vps_id)
+    _, kw = _creds(row)
+    conn = None
+    try:
+        conn = await asyncio.wait_for(asyncssh.connect(row["host"], **kw), timeout=15)
+        res = await asyncio.wait_for(conn.run(_STATS_CMD), timeout=20)
+        return _parse_stats(res.stdout or "")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/stats")
+async def stats(body: dict):
+    """VPS 资源监控:{vps_id} 或 {cred_key}。"""
+    import asyncssh
+
+    if body.get("vps_id"):
+        vid = int(body["vps_id"])
+    elif body.get("cred_key"):
+        k = str(body["cred_key"])
+        try:
+            username, rest = k.split("@", 1)
+            host, port_s = rest.rsplit(":", 1)
+            with db() as c:
+                r = c.execute("SELECT id FROM vps_hosts WHERE host=? AND username=?",
+                              (host, username)).fetchone()
+            if not r:
+                raise HTTPException(404, f"凭据 {k} 未登记为手动 VPS")
+            vid = r["id"]
+        except ValueError:
+            raise HTTPException(400, "凭据键格式错误")
+    else:
+        raise HTTPException(400, "缺少 vps_id 或 cred_key")
+    try:
+        data = await collect_stats(vid)
+        data["ok"] = True
+        return data
+    except asyncio.TimeoutError:
+        raise HTTPException(502, "采集超时(主机无响应)")
+    except asyncssh.Error as e:
+        raise HTTPException(502, f"SSH 错误:{getattr(e, 'reason', e)}")
+    except OSError as e:
+        raise HTTPException(502, f"无法连接:{e}")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"采集失败:{e}")

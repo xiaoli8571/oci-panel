@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0e1319">
 <title>OCI Manage Lite · 云管理面板</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7inKjvuI88L3RleHQ+PC9zdmc+Cg==">
 <link rel="stylesheet" href="/static/vendor/xterm.min.css" media="print" onload="this.media='all'">
 <script>
 /* 主题:localStorage 记忆 → 系统偏好,尽早执行避免闪烁 */
@@ -396,6 +397,11 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
       <div id="domTable"><p class="empty">加载中…</p></div>
       <p class="hint">域名到期经 RDAP 查询(部分后缀可能不支持);SSL 到期直接读取 443 端口证书。命中阈值会写入事件并推送 Telegram/Webhook。</p>
     </div>
+    <div class="qcard" style="margin-top:14px">
+      <h4>⏰ 定时任务 <span class="hint" style="font-weight:400">每日定时 开机/关机/重启;30 秒粒度检查</span>
+        <button style="float:right" onclick="openSchedModal()">＋ 新建任务</button></h4>
+      <div id="schedBody"><p class="empty">加载中…</p></div>
+    </div>
     <div class="qcard" style="margin-top:14px"><h4>最近事件</h4><div id="guardEvents"><p class="empty">加载中…</p></div></div>
   </section>
 
@@ -686,6 +692,48 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
   </div>
 </div>
 
+<!-- 新建定时任务 -->
+<div class="mask" id="schedModal">
+  <div class="modal">
+    <h3>⏰ 新建定时任务</h3>
+    <label>任务名称 *</label><input id="sched-name" placeholder="如 每晚关机省流量">
+    <label>目标实例(来自实例管理页当前列表)</label>
+    <select id="sched-inst"></select>
+    <div class="grid2">
+      <div><label>动作</label>
+        <select id="sched-action">
+          <option value="stop">关机</option>
+          <option value="start">开机</option>
+          <option value="reboot">重启</option>
+        </select></div>
+      <div><label>每日执行时间</label>
+        <input id="sched-time" type="time" value="23:00"></div>
+    </div>
+    <label>生效星期</label>
+    <div class="chips" id="sched-days">
+      <span class="chip on" data-d="1">一</span><span class="chip on" data-d="2">二</span>
+      <span class="chip on" data-d="3">三</span><span class="chip on" data-d="4">四</span>
+      <span class="chip on" data-d="5">五</span><span class="chip on" data-d="6">六</span>
+      <span class="chip on" data-d="7">日</span>
+    </div>
+    <p class="hint">到期执行一次后自动记录,同一天同一时间不会重复执行。跨面板重启不补跑。</p>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('schedModal')">取消</button>
+      <button onclick="saveSched()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- VPS 资源监控 -->
+<div class="mask" id="statsModal">
+  <div class="modal">
+    <h3>📊 资源监控 <span id="statsTitle" style="color:var(--muted);font-size:13px"></span></h3>
+    <div id="statsBody"><p class="empty">采集中…</p></div>
+    <div class="foot"><button class="btn-ghost" onclick="hide('statsModal')">关闭</button>
+      <button onclick="showStatsRefresh()">⟳ 刷新</button></div>
+  </div>
+</div>
+
 <!-- SSH 批量命令 -->
 <div class="mask" id="batchModal">
   <div class="modal wide">
@@ -921,7 +969,7 @@ function showTab(t) {
     const b = $("#nav-" + x); b && b.classList.toggle("active", x === t); });
   if (t === "inst" && $("#quotaBody").querySelector(".hint")) loadQuota();
   if (t === "cloud") { ossAccounts(); }
-  if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); loadDomains(); }
+  if (t === "guard") { loadGuard(); loadGuardEvents(); loadWebhookVal(); loadTg(); loadDomains(); loadSched(); }
   if (t === "cloud") initCloudTab();
 }
 
@@ -993,6 +1041,7 @@ function renderInstances() {
         <td class="cell-ops"><div class="ops">
           <button class="btn-green" onclick="openSshModal(${idx})">SSH</button>
           <button class="btn-cyan" onclick="openSftpModal(${idx})">SFTP</button>
+          <button class="btn-ghost" onclick="showStats(${idx})">📊 资源</button>
           <button class="btn-ghost" onclick="vpsTest(${idx})">测活</button>
           <button class="btn-warn" onclick="vpsReboot(${idx})">重启</button>
           <button class="btn-ghost" onclick='openVpsModal(true,${JSON.stringify(vpsByIdx(idx)).replace(/'/g, "&#39;")})'>编辑</button>
@@ -1779,6 +1828,102 @@ async function checkDomains(notify) {
     await loadDomains();
     if (notify) toast(`已检测 ${d.checked} 个域名`, d.checked ? "ok" : "err");
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- 定时任务星期选择 ---- */
+document.addEventListener("click", ev => {
+  const c = ev.target.closest && ev.target.closest("#sched-days .chip");
+  if (c) c.classList.toggle("on");
+});
+
+/* ---- 定时任务 ---- */
+async function loadSched() {
+  const box = $("#schedBody");
+  try {
+    const d = await api("/api/sched/jobs");
+    const items = d.items || [];
+    if (!items.length) { box.innerHTML = '<p class="empty">暂无定时任务,点右上「＋ 新建任务」</p>'; return; }
+    const wdName = { "1":"一","2":"二","3":"三","4":"四","5":"五","6":"六","7":"日" };
+    box.innerHTML = `<table style="min-width:0"><thead><tr>
+      <th>名称</th><th>目标</th><th>动作</th><th>时间</th><th>星期</th><th>最近执行</th><th>操作</th></tr></thead><tbody>` +
+      items.map(j => {
+        const act = { start:'<span class="badge b-run">开机</span>', stop:'<span class="badge b-stop">关机</span>',
+                      reboot:'<span class="badge b-busy">重启</span>' }[j.action] || esc(j.action);
+        const wds = (j.weekdays||"").split(",").map(w => wdName[w]||w).join(" ");
+        return `<tr>
+          <td><b>${esc(j.name)}</b></td>
+          <td>${esc(j.target_name || j.target_id.slice(0,16))}<br><span class="hint">${esc(j.provider)}</span></td>
+          <td>${act}</td><td><b>${esc(j.time_hhmm)}</b></td><td>${esc(wds)}</td>
+          <td class="wrap"><span class="hint">${esc(j.last_run || "未执行")}</span><br>${esc(j.last_result || "")}</td>
+          <td><div class="ops">
+            <label style="display:flex;gap:4px;align-items:center;color:var(--text);font-size:12px;margin:0">
+              <input type="checkbox" ${j.enabled ? "checked" : ""} style="width:auto" onchange="schedToggle(${j.id}, this.checked)">启用</label>
+            <button class="btn-red" onclick="schedDel(${j.id},'${esc(j.name)}')">删除</button>
+          </div></td></tr>`;
+      }).join("") + `</tbody></table>`;
+  } catch (e) { box.innerHTML = `<p class="hint" style="color:var(--red)">${esc(e.message)}</p>`; }
+}
+async function schedToggle(id, on) {
+  try { await api(`/api/sched/jobs/${id}/toggle`, { method: "POST", body: JSON.stringify({ enabled: on }) });
+    toast(on ? "已启用" : "已停用", "ok"); } catch (e) { toast(e.message, "err"); }
+}
+async function schedDel(id, name) {
+  if (!confirm("删除定时任务「" + name + "」?")) return;
+  try { await api("/api/sched/jobs/" + id, { method: "DELETE" }); toast("已删除", "ok"); loadSched(); }
+  catch (e) { toast(e.message, "err"); }
+}
+function openSchedModal() {
+  if (!instItems.length) return toast("请先到实例管理页加载实例列表", "err");
+  const cands = instItems.filter(i => i.provider === "oci" || i.provider === "aws");
+  if (!cands.length) return toast("没有可调度的云实例", "err");
+  $("#sched-inst").innerHTML = cands.map((i, k) =>
+    `<option value="${instItems.indexOf(i)}">${esc(i.name)}(${i.account_name}·${esc(i.region)}·${i.state})</option>`).join("");
+  show("schedModal");
+}
+async function saveSched() {
+  const idx = +$("#sched-inst").value;
+  const i = instItems[idx];
+  const days = [...document.querySelectorAll("#sched-days .chip.on")].map(c => c.dataset.d);
+  try {
+    await api("/api/sched/jobs", { method: "POST", body: JSON.stringify({
+      name: $("#sched-name").value.trim(),
+      action: $("#sched-action").value,
+      time_hhmm: $("#sched-time").value,
+      weekdays: days.join(","),
+      target: { account_id: i.account_id, id: i.id, name: i.name, provider: i.provider,
+                compartment_id: i.compartment_id || "", region: i.region || "",
+                service: i.service || "" } }) });
+    toast("✅ 定时任务已创建", "ok"); hide("schedModal"); loadSched();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---- VPS 资源监控 ---- */
+let statsIdx = null;
+function showStats(idx) { statsIdx = idx; renderStatsModal(); show("statsModal"); }
+function showStatsRefresh() { if (statsIdx != null) renderStatsModal(); }
+async function renderStatsModal() {
+  const i = instItems[statsIdx];
+  if (!i || !i.vps_id) return;
+  $("#statsTitle").textContent = "· " + i.name;
+  $("#statsBody").innerHTML = '<p class="empty">⏳ 采集中(约 2~5 秒)…</p>';
+  try {
+    const s = await api("/api/vps/stats", { method: "POST", body: JSON.stringify({ vps_id: i.vps_id }) });
+    const bar = (label, pct, color, sub) => `
+      <div style="margin:12px 0">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span>${label}</span><b style="color:${color}">${sub}</b></div>
+        <div style="background:var(--panel2);border-radius:6px;height:10px;overflow:hidden">
+          <div style="width:${Math.min(pct||0,100)}%;height:100%;background:${color};transition:.3s"></div></div>
+      </div>`;
+    const cCol = (s.cpu_pct||0) > 80 ? "var(--red)" : (s.cpu_pct||0) > 50 ? "var(--amber)" : "var(--green)";
+    const mCol = (s.mem_pct||0) > 85 ? "var(--red)" : "var(--amber)";
+    const dCol = (s.disk_pct||"0%").replace("%","") > 85 ? "var(--red)" : "var(--amber)";
+    $("#statsBody").innerHTML =
+      bar("CPU", s.cpu_pct, cCol, (s.cpu_pct ?? "-") + "%") +
+      bar("内存", s.mem_pct, mCol, `${s.mem_used ?? "-"} / ${s.mem_total ?? "-"} MB(${s.mem_pct ?? "-"}%)`) +
+      bar("磁盘(/)", parseFloat(s.disk_pct) || 0, dCol, `${s.disk_used ?? "-"} / ${s.disk_total ?? "-"} GB(${s.disk_pct})`) +
+      `<p class="hint">⏱ ${esc(s.uptime || "-")}</p>`;
+  } catch (e) { $("#statsBody").innerHTML = `<p class="empty" style="color:var(--red)">${esc(e.message)}</p>`; }
 }
 
 /* ---- SSH 批量命令 ---- */
