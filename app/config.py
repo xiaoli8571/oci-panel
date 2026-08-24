@@ -12,7 +12,7 @@ CONFIG_PATH = DATA_DIR / "config.json"        # 存放面板密码哈希等
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
-VERSION = "0.17.1"
+VERSION = "0.18.0"
 
 SESSION_TTL = 7 * 24 * 3600   # 登录会话有效期(秒)
 

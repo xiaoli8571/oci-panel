@@ -4,6 +4,16 @@
 
 ## 🚦 更新日志
 
+### v0.18.0(AWS EC2 创建补齐)
+
+- ☁️ **AWS 接入完善**:在原有 EC2 全区域扫描/电源/换IP 与 Lightsail 全生命周期基础上,
+  新增 **EC2 云服务器创建**:
+  - 创建弹窗 AWS 模式增加「EC2 / Lightsail」切换
+  - EC2 创建:选择区域 → AMI(Amazon 官方最新 20 个)→ 实例类型(t2/t3/t4g/m5/c5/r5 等)
+    → 子网(默认/指定)→ 安全组(默认/指定)→ Key Pair(可空)
+  - 后端 `ec2_meta` / `ec2_create`;创建后自动打 Name 标签
+- 至此 AWS 接入完整:EC2 + Lightsail 的 创建/列表/电源/换IP/终止 全部可用
+
 ### v0.17.1(修复:DNSHE 域名列表空)
 
 - 🐛 修复 DNSHE 子域名接口响应结构与前端不一致:后端 `/api/dnshe/subdomains` 原先返回

@@ -385,3 +385,57 @@ def lightsail_create(acct: dict, region: str, name: str, blueprint_id: str,
                 "status": (ops[0].get("status") if ops else "started")}
     except (BotoCoreError, ClientError) as e:
         raise _wrap(e) from e
+
+# ================================================================ EC2 创建
+
+_EC2_TYPES = [
+    "t2.micro", "t2.small", "t2.medium", "t3.micro", "t3.small", "t3.medium",
+    "t3a.micro", "t3a.small", "t4g.micro", "t4g.small", "t4g.medium",
+    "m5.large", "m5.xlarge", "m6i.large", "m6i.xlarge",
+    "c5.large", "c5.xlarge", "c6i.large", "c6i.xlarge",
+    "r5.large", "r5.xlarge", "r6i.large",
+]
+
+
+def ec2_meta(acct: dict, region: str) -> dict:
+    """返回 EC2 创建所需元数据:AMI、实例类型、子网、安全组。"""
+    ec2 = _client(acct, region)
+    try:
+        imgs = ec2.describe_images(Owners=["amazon"], Filters=[
+            {"Name": "architecture", "Values": ["x86_64"]},
+            {"Name": "state", "Values": ["available"]},
+        ], MaxResults=50).get("Images", [])
+        # 按创建时间倒序取前 20
+        imgs.sort(key=lambda x: x.get("CreationDate", ""), reverse=True)
+        amis = [{"id": i["ImageId"], "name": i.get("Name", i["ImageId"])} for i in imgs[:20]]
+        subnets = [{"id": s["SubnetId"], "name": s.get("Tags", [{"Key": "Name", "Value": ""}])[0].get("Value", ""),
+                    "az": s.get("AvailabilityZone", ""), "public": s.get("MapPublicIpOnLaunch", False)}
+                   for s in ec2.describe_subnets().get("Subnets", [])]
+        sgs = [{"id": g["GroupId"], "name": g.get("GroupName", ""), "vpc": g.get("VpcId", "")}
+               for g in ec2.describe_security_groups().get("SecurityGroups", [])]
+        return {"region": region, "amis": amis, "instance_types": _EC2_TYPES,
+                "subnets": subnets, "security_groups": sgs}
+    except (BotoCoreError, ClientError) as e:
+        raise _wrap(e) from e
+
+
+def ec2_create(acct: dict, region: str, name: str, image_id: str, instance_type: str,
+               subnet_id: str = "", security_group_id: str = "", key_name: str = "") -> dict:
+    """创建 EC2 实例。子网/安全组留空则使用默认 VPC 默认子网/组。"""
+    try:
+        ec2 = _client(acct, region)
+        kw = {"ImageId": image_id, "InstanceType": instance_type,
+              "MinCount": 1, "MaxCount": 1, "TagSpecifications": [{
+                  "ResourceType": "instance",
+                  "Tags": [{"Key": "Name", "Value": name}]}]}
+        if subnet_id:
+            kw["SubnetId"] = subnet_id
+        if security_group_id:
+            kw["SecurityGroupIds"] = [security_group_id]
+        if key_name:
+            kw["KeyName"] = key_name
+        resp = ec2.run_instances(**kw)
+        iid = resp["Instances"][0]["InstanceId"]
+        return {"instance_id": iid, "region": region}
+    except (BotoCoreError, ClientError) as e:
+        raise _wrap(e) from e

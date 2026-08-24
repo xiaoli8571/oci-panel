@@ -43,6 +43,26 @@ def aws_op(body: dict):
     return aws_cloud.instance_op(acct, body["instance_id"], op)
 
 
+@router.get("/aws/ec2-meta")
+def aws_ec2_meta(account_id: int, region: str):
+    acct = _require(_get_account(account_id), "aws")
+    return aws_cloud.ec2_meta(acct, region)
+
+
+@router.post("/aws/ec2-create")
+def aws_ec2_create(body: dict):
+    acct = _require(_get_account(int(body["account_id"])), "aws")
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "请填写实例名称")
+    if not body.get("image_id") or not body.get("instance_type"):
+        raise HTTPException(400, "请选择 AMI 与实例类型")
+    return aws_cloud.ec2_create(
+        acct, body["region"], name, body["image_id"], body["instance_type"],
+        body.get("subnet_id") or "", body.get("security_group_id") or "",
+        body.get("key_name") or "")
+
+
 @router.post("/aws/change-ip")
 def aws_change_ip(body: dict):
     from .. import jobs

@@ -689,11 +689,24 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
         <textarea id="c-ssh" style="min-height:70px" placeholder="ssh-ed25519 AAAA… user@host"></textarea></div>
     </div>
     <div id="awsCreateFields" hidden style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">
-      <div class="grid2">
+      <div style="margin-bottom:8px"><label>AWS 服务类型</label>
+        <select id="c-awsservice" onchange="onAwsServiceChange()">
+          <option value="lightsail">Lightsail 轻量服务器</option>
+          <option value="ec2">EC2 云服务器</option>
+        </select></div>
+      <div id="aws-ls-fields" class="grid2">
         <div><label>区域 *</label><select id="c-awsregion" onchange="onAwsRegion()"></select></div>
         <div><label>可用区(留空自动分配)</label><input id="c-awsaz" placeholder="如 ap-northeast-1a(可留空)"></div>
         <div><label>系统镜像 Blueprint *</label><select id="c-blueprint"></select></div>
         <div><label>套餐 Bundle *</label><select id="c-bundle"></select></div>
+      </div>
+      <div id="aws-ec2-fields" class="grid2" style="display:none">
+        <div><label>EC2 区域 *</label><select id="c-ec2region" onchange="loadEc2Meta()"></select></div>
+        <div><label>AMI 镜像 *</label><select id="c-ec2ami"></select></div>
+        <div><label>实例类型 *</label><select id="c-ec2type"></select></div>
+        <div><label>密钥对 Key Pair(可空)</label><input id="c-ec2key" placeholder="已有 Key Pair 名称,留空则无法 SSH"></div>
+        <div style="grid-column:1/-1"><label>子网(留空用默认)</label><select id="c-ec2subnet"></select></div>
+        <div style="grid-column:1/-1"><label>安全组(留空用默认)</label><select id="c-ec2sg"></select></div>
       </div>
       <p class="hint" id="awsCreateHint">加载中…</p>
     </div>
@@ -1173,7 +1186,7 @@ function setCreatePlatform(p) {
     // 隐藏 OCI 预设 chips
     document.getElementById("chip-amd").style.display = "none";
     document.getElementById("chip-arm").style.display = "none";
-    loadAwsMeta();
+    onAwsServiceChange();
   } else {
     document.getElementById("chip-amd").style.display = "";
     document.getElementById("chip-arm").style.display = "";
@@ -1181,6 +1194,42 @@ function setCreatePlatform(p) {
   }
 }
 
+function onAwsServiceChange() {
+  const svc = $("#c-awsservice").value || "lightsail";
+  const v = $("#c-acct").value || "";
+  const parts = v.split(":");
+  if (parts[0] !== "aws") return;
+  document.getElementById("aws-ls-fields").style.display = svc === "lightsail" ? "" : "none";
+  document.getElementById("aws-ec2-fields").style.display = svc === "ec2" ? "" : "none";
+  if (svc === "ec2") loadEc2Meta();
+  else loadAwsMeta();
+}
+async function loadEc2Meta() {
+  const v = $("#c-acct").value || "";
+  const parts = v.split(":");
+  if (parts[0] !== "aws") return;
+  const aid = +parts[1];
+  const reg = $("#c-ec2region").value || "";
+  $("#awsCreateHint").textContent = "加载 EC2 元数据…";
+  try {
+    const d = await api(`/api/aws/ec2-meta?account_id=${aid}&region=${encodeURIComponent(reg)}`);
+    if (!$("#c-ec2region").value) {
+      $("#c-ec2region").innerHTML = (await api(`/api/aws/lightsail-meta?account_id=${aid}`)).regions.map(r => `<option value="${r}">${esc(r)}</option>`).join("");
+      $("#c-ec2region").value = reg;
+    }
+    $("#c-ec2ami").innerHTML = d.amis.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("")
+      || `<option value="">无可用镜像</option>`;
+    $("#c-ec2type").innerHTML = d.instance_types.map(t => `<option value="${t}">${esc(t)}</option>`).join("");
+    $("#c-ec2subnet").innerHTML = `<option value="">默认子网</option>` + d.subnets.map(s =>
+      `<option value="${s.id}">${esc(s.name || s.id)} (${esc(s.az)}${s.public ? ",公网" : ""})</option>`).join("");
+    $("#c-ec2sg").innerHTML = `<option value="">默认安全组</option>` + d.security_groups.map(g =>
+      `<option value="${g.id}">${esc(g.name)} (${esc(g.vpc)})</option>`).join("");
+    $("#awsCreateHint").textContent = `EC2 ${reg}:${d.amis.length} AMI,${d.subnets.length} 子网,${d.security_groups.length} 安全组`;
+  } catch (e) {
+    $("#awsCreateHint").textContent = "加载失败:" + e.message;
+    $("#c-ec2ami").innerHTML = `<option value="">${esc(e.message)}</option>`;
+  }
+}
 async function loadAwsMeta() {
   const v = $("#c-acct").value || "";
   const parts = v.split(":");
@@ -1317,6 +1366,27 @@ async function submitCreate() {
   const v = $("#c-acct").value || "";
   if (v.split(":")[0] === "aws") {
     const aid = +v.split(":")[1];
+    if ($("#c-awsservice").value === "ec2") {
+      const body = {
+        account_id: aid,
+        region: $("#c-ec2region").value,
+        name: $("#c-name").value.trim(),
+        image_id: $("#c-ec2ami").value,
+        instance_type: $("#c-ec2type").value,
+        subnet_id: $("#c-ec2subnet").value,
+        security_group_id: $("#c-ec2sg").value,
+        key_name: $("#c-ec2key").value.trim(),
+      };
+      if (!body.name) return toast("请填写实例名称", "err");
+      if (!body.image_id || !body.instance_type) return toast("请选择 AMI 与实例类型", "err");
+      hide("createModal");
+      try {
+        const d = await api("/api/aws/ec2-create", { method: "POST", body: JSON.stringify(body) });
+        toast(`✅ EC2 创建中:${body.name}(${d.instance_id})`, "ok");
+        setTimeout(loadInstances, 8000);
+      } catch (e) { toast(e.message, "err"); }
+      return;
+    }
     const body = {
       account_id: aid,
       region: $("#c-awsregion").value,
