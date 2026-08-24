@@ -249,3 +249,102 @@ def check_account(acct: dict) -> dict:
             "region": (acct.get("region") or "").lower(),
             "instance_count": n if ok else None,
             "hint": "" if ok else "请检查 API Key、区域(如 us-south/eu-de/jp-tok)与 IAM 权限"}
+
+
+# ---------------------------------------------------------------- 创建/终止实例
+
+def ibm_meta(acct: dict) -> dict:
+    """返回创建实例所需的 VPC/子网/镜像/Profile/密钥/可用区。"""
+    d = {}
+    for path, key in (("/vpcs", "vpcs"), ("/subnets", "subnets"),
+                      ("/instance/profiles", "profiles"), ("/keys", "keys")):
+        try:
+            out, start = [], None
+            while True:
+                params = {"limit": 100}
+                if start:
+                    params["start"] = start
+                r = _req(acct, "GET", path, params=params)
+                out += r.get(key, [])
+                start = (r.get("next") or {}).get("href", "")
+                if not start:
+                    break
+                start = start.split("start=")[-1].split("&")[0]
+            d[key] = out
+        except ProviderError as e:
+            d[key] = []
+            log.warning("IBM 元数据 %s 获取失败:%s", path, e)
+
+    # 镜像(公开+私有;公开可能非常多,取前 100 并尽量保留常用 Linux)
+    try:
+        imgs = []
+        for vis in ("public", "private"):
+            r = _req(acct, "GET", "/images", params={"limit": 50, "visibility": vis})
+            imgs += r.get("images", [])
+        # 按名称粗略排序:Ubuntu/Debian/CentOS/Windows 优先
+        def sort_key(x):
+            n = (x.get("name") or "").lower()
+            for i, kw in enumerate(["ubuntu", "debian", "rocky", "centos", "almalinux", "windows"]):
+                if kw in n:
+                    return i
+            return 99
+        imgs.sort(key=lambda x: (sort_key(x), x.get("created_at", "")))
+        d["images"] = imgs[:80]
+    except ProviderError as e:
+        d["images"] = []
+        log.warning("IBM 镜像获取失败:%s", e)
+
+    # 可用区
+    try:
+        zs = []
+        for z in _req(acct, "GET", "/regions", params={"limit": 100}).get("regions", []):
+            if z.get("name") == (acct.get("region") or "").lower():
+                zs = [x.get("name", "") for x in z.get("endpoints", [])] or [z.get("name", "")]
+        d["zones"] = zs or [(acct.get("region") or "").lower() + "-1"]
+    except ProviderError:
+        d["zones"] = [(acct.get("region") or "").lower() + "-1"]
+
+    # 简化输出字段
+    return {
+        "vpcs": [{"id": x["id"], "name": x.get("name", "")} for x in d.get("vpcs", [])],
+        "subnets": [{"id": x["id"], "name": x.get("name", ""),
+                     "zone": (x.get("zone") or {}).get("name", ""),
+                     "vpc": (x.get("vpc") or {}).get("id", "")} for x in d.get("subnets", [])],
+        "images": [{"id": x["id"], "name": x.get("name", "")} for x in d.get("images", [])],
+        "profiles": [{"name": x.get("name", ""),
+                      "cpu": ((x.get("vcpu") or {}).get("count")),
+                      "mem": x.get("memory", {}).get("value") if isinstance(x.get("memory"), dict) else x.get("memory"),
+                      "label": x.get("name", "")} for x in d.get("profiles", [])],
+        "keys": [{"id": x["id"], "name": x.get("name", "")} for x in d.get("keys", [])],
+        "zones": d.get("zones", []),
+    }
+
+
+def create_instance(acct: dict, d: dict) -> dict:
+    """创建 VPC 实例。
+
+    d: {name, vpc_id, subnet_id, image_id, profile, key_id, zone}
+    """
+    name = str(d.get("name") or "").strip()
+    if not name:
+        raise ProviderError("实例名称不能为空")
+    if not (d.get("vpc_id") and d.get("subnet_id") and d.get("image_id") and d.get("profile") and d.get("zone")):
+        raise ProviderError("缺少必要参数(VPC/子网/镜像/Profile/可用区)")
+    body = {
+        "name": name,
+        "vpc": {"id": d["vpc_id"]},
+        "zone": {"name": d["zone"]},
+        "profile": {"name": d["profile"]},
+        "image": {"id": d["image_id"]},
+        "primary_network_interface": {"subnet": {"id": d["subnet_id"]}},
+    }
+    if d.get("key_id"):
+        body["keys"] = [{"id": d["key_id"]}]
+    r = _req(acct, "POST", "/instances", json_body=body)
+    return {"instance_id": r.get("id", ""), "name": r.get("name", name)}
+
+
+def terminate_instance(acct: dict, instance_id: str) -> dict:
+    """终止(删除)VPC 实例。"""
+    _req(acct, "DELETE", f"/instances/{instance_id}")
+    return {"ok": True}

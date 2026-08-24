@@ -662,7 +662,8 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
     <p class="sub" id="createSub">选择平台后按需填写</p>
     <div class="chips">
       <span class="chip on" id="cp-oci" onclick="setCreatePlatform('oci')">Oracle Cloud</span>
-      <span class="chip" id="cp-aws" onclick="setCreatePlatform('aws')">AWS Lightsail</span>
+      <span class="chip" id="cp-aws" onclick="setCreatePlatform('aws')">AWS</span>
+      <span class="chip" id="cp-ibm" onclick="setCreatePlatform('ibm')">IBM Cloud</span>
       <span class="chip on" id="chip-amd" style="margin-left:6px" onclick="setPreset('amd')">AMD 微型 1C/1G(永远免费)</span>
       <span class="chip" id="chip-arm" onclick="setPreset('arm')">ARM A1.Flex 2C/12G(可强开)</span>
       <span class="chip" id="chip-bootvol" style="margin-left:6px" onclick="setPreset('bootvol')">💾 从启动盘开机</span>
@@ -708,6 +709,17 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
         <div style="grid-column:1/-1"><label>子网(留空用默认)</label><select id="c-ec2subnet"></select></div>
         <div style="grid-column:1/-1"><label>安全组(留空用默认)</label><select id="c-ec2sg"></select></div>
       </div>
+    <div id="ibmCreateFields" hidden style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">
+      <div class="grid2">
+        <div><label>VPC *</label><select id="ibm-vpc" onchange="onIbmVpc()"></select></div>
+        <div><label>子网 *</label><select id="ibm-subnet"></select></div>
+        <div><label>系统镜像 *</label><select id="ibm-image"></select></div>
+        <div><label>实例配置 Profile *</label><select id="ibm-profile"></select></div>
+        <div><label>SSH Key(可空)</label><select id="ibm-key"><option value="">无密钥(无法SSH)</option></select></div>
+        <div><label>可用区 *</label><select id="ibm-zone"></select></div>
+      </div>
+      <p class="hint" id="ibmCreateHint">加载中…</p>
+    </div>
       <p class="hint" id="awsCreateHint">加载中…</p>
     </div>
     <p class="hint" id="c-hint">提示:免费层 ARM A1 为 4 核 / 24G 内存总额度;创建过程约 1~3 分钟,可在任务窗口实时查看。</p>
@@ -1108,7 +1120,7 @@ function renderInstances() {
                <button class="btn-purple" onclick="openResize(${idx})">规格</button>
                <button class="btn-ghost" onclick="openRename(${idx})">改名</button>
                <button class="btn-ghost" onclick="showTraffic(${idx})">流量</button>`}
-          ${i.provider === "ibm" ? "" : `<button class="btn-red" onclick="openTerminate(${idx})">终止</button>`}
+          <button class="btn-red" onclick="openTerminate(${idx})">终止</button>
         </div></td></tr>`;
     }).join("");
   }
@@ -1174,22 +1186,23 @@ function setCreatePlatform(p) {
   createPlatform = p;
   $("#cp-oci").classList.toggle("on", p === "oci");
   $("#cp-aws").classList.toggle("on", p === "aws");
+  $("#cp-ibm").classList.toggle("on", p === "ibm");
   const aws = p === "aws";
-  $("#createSub").textContent = aws ? "AWS Lightsail 创建:选择区域、镜像与套餐" : "预设一键预填规格;ARM A1 支持容量不足自动重试(强开模式)";
-  // 切换字段可见性:OCI 字段组 / AWS 字段组
+  const ibm = p === "ibm";
+  $("#createSub").textContent = ibm ? "IBM Cloud VPC 创建:选择 VPC/子网/镜像/Profile" : (aws ? "AWS EC2 / Lightsail 创建" : "预设一键预填规格;ARM A1 支持容量不足自动重试(强开模式)");
+  // 切换字段可见性:OCI / AWS / IBM
   const ociFields = ["c-comp", "c-ad", "c-subnet", "c-boot", "c-os", "c-image", "c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box", "c-bv-box"];
-  ociFields.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = aws ? "none" : ""; });
+  ociFields.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (aws || ibm) ? "none" : ""; });
   document.getElementById("awsCreateFields").hidden = !aws;
-  // OCI 的 SSH 公钥仍显示(两边都需要)
+  document.getElementById("ibmCreateFields").hidden = !ibm;
+  // 隐藏/显示 OCI 预设 chips
+  document.getElementById("chip-amd").style.display = (aws || ibm) ? "none" : "";
+  document.getElementById("chip-arm").style.display = (aws || ibm) ? "none" : "";
   if (aws) {
-    const f = document.getElementById("f-sshLabel");
-    // 隐藏 OCI 预设 chips
-    document.getElementById("chip-amd").style.display = "none";
-    document.getElementById("chip-arm").style.display = "none";
     onAwsServiceChange();
+  } else if (ibm) {
+    loadIbmMeta();
   } else {
-    document.getElementById("chip-amd").style.display = "";
-    document.getElementById("chip-arm").style.display = "";
     setPreset(presetKind || "arm");
   }
 }
@@ -1297,10 +1310,12 @@ async function loadBootVolumes() {
 async function openCreate() {
   const ocis = acctItems.filter(a => (a.provider || "oci") === "oci");
   const awss = acctItems.filter(a => a.provider === "aws");
-  if (!ocis.length && !awss.length) return toast("请先添加 Oracle Cloud 或 AWS 账户", "err");
+  const ibms = acctItems.filter(a => a.provider === "ibm");
+  if (!ocis.length && !awss.length && !ibms.length) return toast("请先添加 Oracle Cloud / AWS / IBM 账户", "err");
   $("#c-acct").innerHTML = "";
   if (ocis.length) $("#c-acct").innerHTML += `<optgroup label="Oracle Cloud">${ocis.map(a => `<option value="oci:${a.id}">${esc(a.name)}(${esc(a.region)})</option>`).join("")}</optgroup>`;
   if (awss.length) $("#c-acct").innerHTML += `<optgroup label="AWS">${awss.map(a => `<option value="aws:${a.id}">${esc(a.name)}(${esc(a.region || "自动")})</option>`).join("")}</optgroup>`;
+  if (ibms.length) $("#c-acct").innerHTML += `<optgroup label="IBM Cloud">${ibms.map(a => `<option value="ibm:${a.id}">${esc(a.name)}(${esc(a.region)})</option>`).join("")}</optgroup>`;
   setCreatePlatform("oci");
   show("createModal");
   await onCreateAcct();
@@ -1314,6 +1329,10 @@ async function onCreateAcct() {
   const parts = v.split(":");
   if (parts[0] === "aws") {
     setCreatePlatform("aws");
+    return;
+  }
+  if (parts[0] === "ibm") {
+    setCreatePlatform("ibm");
     return;
   }
   setCreatePlatform("oci");
@@ -1362,8 +1381,63 @@ function onBvPick() {
   hint.style.display = "";
   hint.textContent = `💾 已自动匹配 AD:${opt.dataset.ad}(启动盘 ${opt.dataset.gbs}GB 与实例须同 AD)`;
 }
+async function loadIbmMeta() {
+  const v = $("#c-acct").value || "";
+  const parts = v.split(":");
+  if (parts[0] !== "ibm") return;
+  const aid = +parts[1];
+  $("#ibmCreateHint").textContent = "加载 IBM 元数据…";
+  try {
+    const d = await api(`/api/ibm/meta?account_id=${aid}`);
+    $("#ibm-vpc").innerHTML = d.vpcs.length ? d.vpcs.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")
+      : `<option value="">无 VPC,请先在 IBM 控制台创建</option>`;
+    $("#ibm-image").innerHTML = d.images.length ? d.images.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")
+      : `<option value="">无可用镜像</option>`;
+    $("#ibm-profile").innerHTML = d.profiles.length ? d.profiles.map(x =>
+      `<option value="${x.name}">${esc(x.name)} · ${x.cpu}核/${x.mem}G</option>`).join("")
+      : `<option value="">无可用配置</option>`;
+    $("#ibm-key").innerHTML = `<option value="">无密钥(无法SSH)</option>` + d.keys.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+    $("#ibm-zone").innerHTML = d.zones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join("");
+    onIbmVpc();
+    $("#ibmCreateHint").textContent = `已加载:${d.vpcs.length} VPC,${d.subnets.length} 子网,${d.images.length} 镜像,${d.profiles.length} Profile`;
+  } catch (e) { $("#ibmCreateHint").textContent = "加载失败:" + e.message; }
+}
+function onIbmVpc() {
+  const vpc = $("#ibm-vpc").value;
+  // 子网过滤按 VPC;先展示全部,简单处理
+  $("#ibm-subnet").innerHTML = `<option value="">请先选择 VPC</option>`;
+  if (!vpc) return;
+  api(`/api/ibm/meta?account_id=${+$("#c-acct").value.split(":")[1]}`).then(d => {
+    $("#ibm-subnet").innerHTML = d.subnets.filter(s => s.vpc === vpc).length
+      ? d.subnets.filter(s => s.vpc === vpc).map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.zone)})</option>`).join("")
+      : `<option value="">该 VPC 无子网</option>`;
+  }).catch(() => {});
+}
 async function submitCreate() {
   const v = $("#c-acct").value || "";
+  if (v.split(":")[0] === "ibm") {
+    const aid = +v.split(":")[1];
+    const body = {
+      account_id: aid,
+      name: $("#c-name").value.trim(),
+      vpc_id: $("#ibm-vpc").value,
+      subnet_id: $("#ibm-subnet").value,
+      image_id: $("#ibm-image").value,
+      profile: $("#ibm-profile").value,
+      key_id: $("#ibm-key").value,
+      zone: $("#ibm-zone").value,
+    };
+    if (!body.name) return toast("请填写实例名称", "err");
+    if (!body.vpc_id || !body.subnet_id || !body.image_id || !body.profile || !body.zone)
+      return toast("请选择 VPC/子网/镜像/Profile/可用区", "err");
+    hide("createModal");
+    try {
+      const d = await api("/api/ibm/create", { method: "POST", body: JSON.stringify(body) });
+      toast(`✅ IBM 创建中:${body.name}(${d.instance_id})`, "ok");
+      setTimeout(loadInstances, 8000);
+    } catch (e) { toast(e.message, "err"); }
+    return;
+  }
   if (v.split(":")[0] === "aws") {
     const aid = +v.split(":")[1];
     if ($("#c-awsservice").value === "ec2") {
@@ -1668,6 +1742,9 @@ async function submitTerminate() {
       await api("/api/aws/op", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, service: i.service || "ec2", region: i.region,
         instance_id: i.id, op: "TERMINATE" }) });
+    } else if (i.provider === "ibm") {
+      await api("/api/ibm/terminate", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, instance_id: i.id }) });
     } else {
       await api("/api/instances/terminate", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, instance_id: i.id,

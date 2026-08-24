@@ -4,6 +4,15 @@
 
 ## 🚦 更新日志
 
+### v0.19.0(IBM Cloud 创建/终止)
+
+- ☁️ **IBM Cloud 补齐创建与终止**:
+  - 创建实例:选择 VPC → 子网(按 VPC 过滤)→ 镜像(公开+私有)→ Profile(CPU/内存)→ SSH Key → 可用区
+  - 终止实例:实例行「终止」按钮对 IBM 生效(直接删除 VPC 实例)
+  - 后端新增 `ibm_meta` / `create_instance` / `terminate_instance`,路由 `/api/ibm/meta|create|terminate`
+  - 前端创建弹窗新增 IBM 平台与完整字段;账户下拉含 IBM
+- mock 单测覆盖元数据/创建/终止全通过
+
 ### v0.18.0(AWS EC2 创建补齐)
 
 - ☁️ **AWS 接入完善**:在原有 EC2 全区域扫描/电源/换IP 与 Lightsail 全生命周期基础上,

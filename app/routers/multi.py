@@ -119,6 +119,27 @@ def ibm_change_ip(body: dict):
     return {"job_id": job["id"]}
 
 
+@router.get("/ibm/meta")
+def ibm_meta(account_id: int):
+    from .. import ibm_cloud
+    acct = _require(_get_account(account_id), "ibm")
+    return ibm_cloud.ibm_meta(acct)
+
+
+@router.post("/ibm/create")
+def ibm_create(body: dict):
+    from .. import ibm_cloud
+    acct = _require(_get_account(int(body["account_id"])), "ibm")
+    return ibm_cloud.create_instance(acct, body)
+
+
+@router.post("/ibm/terminate")
+def ibm_terminate(body: dict):
+    from .. import ibm_cloud
+    acct = _require(_get_account(int(body["account_id"])), "ibm")
+    return ibm_cloud.terminate_instance(acct, body["instance_id"])
+
+
 @router.get("/ibm/floating-ips")
 def ibm_floating_ips(account_id: int):
     from .. import ibm_cloud
