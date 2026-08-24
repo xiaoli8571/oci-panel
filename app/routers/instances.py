@@ -46,6 +46,9 @@ def _scan_accounts(rows) -> tuple[list[dict], list[str]]:
                 return out, ls_errs
             if p == "oci":
                 return oci_client.list_instances(acct), []
+            if p == "ibm":
+                from .. import ibm_cloud
+                return ibm_cloud.list_instances(acct), []
             return [], []   # dns 类账户不出现在实例视图
         except Exception as e:  # noqa: BLE001
             tag = f"{acct['name']}·{acct.get('region') or ''}"

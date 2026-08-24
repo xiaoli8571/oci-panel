@@ -17,6 +17,7 @@ class AccountIn(BaseModel):
     private_key: str = ""            # PEM;编辑时留空表示不修改
     aws_access_key_id: str = ""
     aws_secret_key: str = ""
+    ibm_api_key: str = ""            # IBM Cloud IAM API Key
     cf_token: str = ""
     he_email: str = ""
     he_pass: str = ""

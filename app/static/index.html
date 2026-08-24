@@ -558,6 +558,7 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
       <span class="chip" id="pc-aws" onclick="setProvider('aws')">AWS</span>
       <span class="chip" id="pc-cloudflare" onclick="setProvider('cloudflare')">Cloudflare</span>
       <span class="chip" id="pc-dnshe" onclick="setProvider('dnshe')">DNSHE</span>
+      <span class="chip" id="pc-ibm" onclick="setProvider('ibm')">IBM Cloud</span>
     </div>
     <div style="margin:6px 0 2px"><label style="margin-top:0">备注名称 *(自定义,方便区分)</label>
       <input id="f-name" placeholder="如 myserver1 / 我的CF主号"></div>
@@ -628,6 +629,23 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
         <div><label>API Key *</label><input id="f-dnshekey" placeholder="cfsd_xxxxxxxxxx"></div>
         <div><label>API Secret *</label><input id="f-dnshesecret" type="password" placeholder="创建 API Key 时只显示一次"></div>
         <div style="grid-column:1/-1"><p class="hint">在 <b>my.dnshe.com</b> 客户区 → 免费域名管理 → 左侧「API 管理」→ 创建 API Key,把 <b>API Key</b> 和 <b>API Secret</b> 填到这里。官方 API V2.0,支持子域名与 DNS 记录全量增删改查。</p></div>
+      </div>
+    </div>
+    <div id="pv-ibm" hidden>
+      <div class="grid2">
+        <div><label>IAM API Key *</label><input id="f-ibmkey" type="password" placeholder="IBM Cloud IAM API Key"></div>
+        <div><label>区域 *</label><input id="f-ibmregion" list="ibmregions" placeholder="us-south / eu-de / jp-tok">
+          <datalist id="ibmregions">
+            <option value="us-south">美国达拉斯</option>
+            <option value="us-east">美国东部</option>
+            <option value="eu-de">德国法兰克福</option>
+            <option value="eu-gb">英国伦敦</option>
+            <option value="jp-tok">日本东京</option>
+            <option value="au-syd">澳大利亚悉尼</option>
+            <option value="br-sao">巴西圣保罗</option>
+            <option value="ca-tor">加拿大多伦多</option>
+          </datalist></div>
+        <div style="grid-column:1/-1"><p class="hint">IBM Cloud 控制台 → Manage → Access(IAM) → API keys → 创建 API Key。支持 <b>VPC 实例列表/电源/换IP</b>,需给 API Key 所在账户授权 VPC 实例查看与操作权限。</p></div>
       </div>
     </div>
     <div class="foot">
@@ -1061,21 +1079,23 @@ function renderInstances() {
         <td class="wrap" data-l="配置">${spec}<br><span style="color:var(--muted);font-size:11px">${esc(i.shape || "")}</span></td>
         <td data-l="启动盘">${i.boot_gbs ? i.boot_gbs + " GB" : "-"}</td>
         <td data-l="区域/AD">${esc(i.region)}<br><span style="color:var(--muted);font-size:12px">${esc(i.ad)}</span></td>
-        <td data-l="账户">${esc(i.account_name)}${i.provider === "aws" ? ' <span class="badge b-busy">AWS</span>' : ""}</td>
+        <td data-l="账户">${esc(i.account_name)}${i.provider === "aws" ? ' <span class="badge b-busy">AWS</span>' : ""}${i.provider === "ibm" ? ' <span class="badge b-purple">IBM</span>' : ""}</td>
         <td class="cell-ops"><div class="ops">
           <button ${running ? "" : "disabled"} class="btn-green" onclick="openSshModal(${idx})">SSH</button>
           <button ${running ? "" : "disabled"} class="btn-cyan" onclick="openSftpModal(${idx})">SFTP</button>
           <button ${running ? "disabled" : ""} onclick="doOp(${idx},'START')">启动</button>
-          <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'${i.provider === "aws" ? "STOP" : "SOFTSTOP"}')">关机</button>
+          <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'${i.provider === "aws" || i.provider === "ibm" ? "STOP" : "SOFTSTOP"}')">关机</button>
           <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'RESET')">重启</button>
           ${i.provider === "aws"
             ? `<button class="btn-cyan" onclick="awsChangeIp(${idx})">换IP</button>`
+            : i.provider === "ibm"
+            ? `<button class="btn-cyan" onclick="ibmChangeIp(${idx})">换IP</button>`
             : `<button class="btn-cyan" onclick="openNet(${idx})">网络</button>
                <button class="btn-ghost" onclick="openVol(${idx})">磁盘</button>
                <button class="btn-purple" onclick="openResize(${idx})">规格</button>
                <button class="btn-ghost" onclick="openRename(${idx})">改名</button>
                <button class="btn-ghost" onclick="showTraffic(${idx})">流量</button>`}
-          <button class="btn-red" onclick="openTerminate(${idx})">终止</button>
+          ${i.provider === "ibm" ? "" : `<button class="btn-red" onclick="openTerminate(${idx})">终止</button>`}
         </div></td></tr>`;
     }).join("");
   }
@@ -1093,6 +1113,9 @@ async function doOp(idx, op) {
       await api("/api/aws/op", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, service: i.service || "ec2", region: i.region,
         instance_id: i.id, op }) });
+    } else if (i.provider === "ibm") {
+      await api("/api/ibm/op", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, instance_id: i.id, op }) });
     } else {
       await api("/api/instances/op", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, compartment_id: i.compartment_id, instance_id: i.id, op }) });
@@ -1594,6 +1617,16 @@ async function awsChangeIp(idx) {
   } catch (e) { toast(e.message, "err"); }
 }
 
+async function ibmChangeIp(idx) {
+  const i = instItems[idx];
+  if (!confirm(`更换「${i.name}」公网浮动 IP?\n将申请新浮动 IP 并绑定到主网卡(原 IP 会被释放)。`)) return;
+  try {
+    const d = await api("/api/ibm/change-ip", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, instance_id: i.id }) });
+    openJob("更换公网 IP · " + i.name, d.job_id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
 /* ================= 流量 ================= */
 let trafHours = 24;
 function setTrafHours(h) {
@@ -1742,6 +1775,7 @@ function openAcctModal(a) {
   $("#f-akid").value = ""; $("#f-aksecret").value = "";
   $("#f-cftoken").value = "";
   $("#f-dnshekey").value = ""; $("#f-dnshesecret").value = "";
+  $("#f-ibmkey").value = ""; $("#f-ibmregion").value = "";
   $("#am-pemname").textContent = "";
   setProvider(a?.provider || "oci", true);
   show("acctModal");
@@ -1755,6 +1789,7 @@ async function saveAcct() {
     aws_access_key_id: $("#f-akid").value.trim(), aws_secret_key: $("#f-aksecret").value,
     cf_token: $("#f-cftoken").value.trim(),
     dnshe_api_key: $("#f-dnshekey").value.trim(), dnshe_api_secret: $("#f-dnshesecret").value,
+    ibm_api_key: $("#f-ibmkey").value.trim(),
   };
   if (!body.name) return toast("请填写备注名称", "err");
   if (curProvider === "oci") {
@@ -1768,6 +1803,9 @@ async function saveAcct() {
     if (!body.cf_token) return toast("请填写 API Token", "err");
   } else if (curProvider === "dnshe") {
     if (!body.dnshe_api_key || !body.dnshe_api_secret) return toast("请填写 DNSHE API Key 与 API Secret", "err");
+  } else if (curProvider === "ibm") {
+    if (!body.ibm_api_key || !$("#f-ibmregion").value.trim()) return toast("请填写 IBM IAM API Key 与区域", "err");
+    body.region = $("#f-ibmregion").value.trim();
   }
   try {
     if (editAcctId) await api("/api/accounts/" + editAcctId, { method: "PUT", body: JSON.stringify(body) });
@@ -1932,7 +1970,7 @@ async function schedDel(id, name) {
 }
 function openSchedModal() {
   if (!instItems.length) return toast("请先到实例管理页加载实例列表", "err");
-  const cands = instItems.filter(i => i.provider === "oci" || i.provider === "aws");
+  const cands = instItems.filter(i => i.provider === "oci" || i.provider === "aws" || i.provider === "ibm");
   if (!cands.length) return toast("没有可调度的云实例", "err");
   $("#sched-inst").innerHTML = cands.map((i, k) =>
     `<option value="${instItems.indexOf(i)}">${esc(i.name)}(${i.account_name}·${esc(i.region)}·${i.state})</option>`).join("");
@@ -2865,7 +2903,7 @@ async function runDdns() {
 
 /* ================= 账户弹窗辅助 ================= */
 let curProvider = "oci";
-const PROV_LABELS = { oci: "Oracle Cloud", aws: "AWS", cloudflare: "Cloudflare", dnshe: "DNSHE" };
+const PROV_LABELS = { oci: "Oracle Cloud", aws: "AWS", cloudflare: "Cloudflare", dnshe: "DNSHE", ibm: "IBM Cloud" };
 function setProvider(p, silent) {
   curProvider = p;
   Object.keys(PROV_LABELS).forEach(k => {

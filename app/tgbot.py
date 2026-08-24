@@ -246,8 +246,8 @@ def _run_reip(chat_id: str, arg: str) -> str:
     if err or not m:
         return err or "未找到实例"
     r = m[0]
-    if r.get("provider") not in ("oci", "aws"):
-        return "⚠ 换 IP 仅支持 OCI / AWS 实例"
+    if r.get("provider") not in ("oci", "aws", "ibm"):
+        return "⚠ 换 IP 仅支持 OCI / AWS / IBM 实例"
     from . import jobs
     from .database import db
     with db() as c:
@@ -265,6 +265,17 @@ def _run_reip(chat_id: str, arg: str) -> str:
         job = jobs.start_job(f"tg_reip_{r['name']}", _job)
         return (f"📤 任务已提交(job {job['id'][:8]}…)\n完成后新 IP 会写进任务日志;"
                 f"\n也可稍后用 /ip {r['name']} 查看")
+    if r["provider"] == "ibm":
+        from . import ibm_cloud
+
+        def _job_ibm(progress):
+            res = ibm_cloud.change_public_ip(progress, acct, "", r["id"])
+            with _snap_lock:
+                _snap["ts"] = 0
+            return res
+        job = jobs.start_job(f"tg_reip_{r['name']}", _job_ibm)
+        return f"📤 任务已提交(job {job['id'][:8]}…),完成后可用 /ip {r['name']} 查看"
+
     # AWS EC2 / Lightsail 同步执行(带进度消息)
     from . import aws_cloud
 

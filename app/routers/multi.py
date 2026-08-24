@@ -73,6 +73,39 @@ def aws_lightsail_create(body: dict):
         body["blueprint_id"], body["bundle_id"], body.get("az", ""))
 
 
+# ---------------------------------------------------------------- IBM Cloud VPC
+
+@router.get("/ibm/instances")
+def ibm_instances(account_id: int):
+    from .. import ibm_cloud
+    acct = _require(_get_account(account_id), "ibm")
+    return {"items": ibm_cloud.list_instances(acct)}
+
+
+@router.post("/ibm/op")
+def ibm_op(body: dict):
+    from .. import ibm_cloud
+    acct = _require(_get_account(int(body["account_id"])), "ibm")
+    return ibm_cloud.instance_op(acct, body["instance_id"], body["op"].lower())
+
+
+@router.post("/ibm/change-ip")
+def ibm_change_ip(body: dict):
+    from .. import ibm_cloud, jobs
+    acct = _require(_get_account(int(body["account_id"])), "ibm")
+    job = jobs.start_job(
+        "ibm_change_ip", ibm_cloud.change_public_ip, acct, "",
+        body["instance_id"])
+    return {"job_id": job["id"]}
+
+
+@router.get("/ibm/floating-ips")
+def ibm_floating_ips(account_id: int):
+    from .. import ibm_cloud
+    acct = _require(_get_account(account_id), "ibm")
+    return {"items": ibm_cloud.list_floating_ips(acct)}
+
+
 # ---------------------------------------------------------------- Cloudflare DNS
 
 @router.get("/cf/zones")

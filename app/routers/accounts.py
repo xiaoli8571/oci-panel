@@ -45,6 +45,12 @@ def _validate(a: AccountIn):
             raise HTTPException(
                 400, f"Secret Access Key 长度应为 40 位,当前 {len(sk)} 位 —— "
                      "大概率复制不完整(创建时仅显示一次,请重新生成并完整复制)")
+    elif p == "ibm":
+        key = a.ibm_api_key.strip()
+        if len(key) < 20:
+            raise HTTPException(400, "请填写 IBM Cloud IAM API Key(Manage→Access(IAM)→API keys 创建)")
+        if not a.region.strip():
+            raise HTTPException(400, "请填写区域,如 us-south / eu-de / jp-tok / au-syd")
     elif p == "cloudflare":
         if len(a.cf_token.strip()) < 30:
             raise HTTPException(400, "请填写 Cloudflare API Token(至少 30 字符)")
@@ -57,7 +63,7 @@ def _validate(a: AccountIn):
         raise HTTPException(400, f"不支持的提供商:{p}")
 
 
-PROVIDERS = ("oci", "aws", "cloudflare", "dnshe")
+PROVIDERS = ("oci", "aws", "ibm", "cloudflare", "dnshe")
 
 
 def _extra_json(a: AccountIn, keep_old: str = "") -> str:
@@ -71,6 +77,7 @@ def _extra_json(a: AccountIn, keep_old: str = "") -> str:
     data = {
         "aws_access_key_id": a.aws_access_key_id.strip() or old.get("aws_access_key_id", ""),
         "aws_secret_key": a.aws_secret_key.strip() or old.get("aws_secret_key", ""),
+        "ibm_api_key": a.ibm_api_key.strip() or old.get("ibm_api_key", ""),
         "cf_token": a.cf_token.strip() or old.get("cf_token", ""),
         "he_email": a.he_email.strip() or old.get("he_email", ""),
         "he_pass": a.he_pass or old.get("he_pass", ""),
@@ -221,6 +228,8 @@ def check_account(account_id: int):
         return _check_oci(acct)
     if p == "aws":
         return _check_aws(acct)
+    if p == "ibm":
+        return _check_ibm(acct)
     if p == "cloudflare":
         return _check_cf(acct)
     if p == "dnshe":
@@ -267,6 +276,18 @@ def _check_aws(acct: dict) -> dict:
         ok, err = False, str(e)
     return {"provider": "aws", "remote_ok": ok, "error": err,
             "hint": "AWS 全区域扫描已在实例列表验证;若失败请检查 Access Key / Secret Key(Secret 应为 40 位)" if err else ""}
+
+
+def _check_ibm(acct: dict) -> dict:
+    from .. import ibm_cloud
+    try:
+        info = ibm_cloud.check_account(acct)
+    except Exception as e:  # noqa: BLE001
+        info = {"provider": "ibm", "remote_ok": False, "error": str(e)}
+    hint = info.get("hint") or ""
+    if info.get("remote_ok"):
+        hint = f"IAM 认证成功,{info.get('instance_count', 0)} 台实例({info.get('region')})"
+    return {**info, "hint": hint}
 
 
 def _check_cf(acct: dict) -> dict:

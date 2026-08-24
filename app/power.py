@@ -6,9 +6,9 @@ from .database import db
 from .pcreds import ProviderError
 
 MAPS = {
-    "start":  {"oci": "START",    "aws": "START", "aws_ls": "START",  "label": "开机"},
-    "stop":   {"oci": "SOFTSTOP", "aws": "STOP",  "aws_ls": "STOP",   "label": "关机"},
-    "reboot": {"oci": "RESET",    "aws": "RESET", "aws_ls": "REBOOT", "label": "重启"},
+    "start":  {"oci": "START",    "aws": "START", "aws_ls": "START",  "ibm": "start",       "label": "开机"},
+    "stop":   {"oci": "SOFTSTOP", "aws": "STOP",  "aws_ls": "STOP",   "ibm": "stop",        "label": "关机"},
+    "reboot": {"oci": "RESET",    "aws": "RESET", "aws_ls": "REBOOT", "ibm": "reboot",      "label": "重启"},
 }
 
 
@@ -37,6 +37,9 @@ def power_op(row: dict, action: str) -> str:
             aws_cloud.lightsail_op(acct, row.get("region") or "", row["id"], m["aws_ls"])
         else:
             aws_cloud.instance_op(acct, row["id"], m["aws"])
+    elif p == "ibm":
+        from . import ibm_cloud
+        ibm_cloud.instance_op(acct, row["id"], m["ibm"])
     else:
         raise ProviderError(f"该类型({p})不支持远程电源操作")
     try:

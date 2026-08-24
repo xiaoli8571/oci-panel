@@ -160,7 +160,7 @@ def run_once() -> dict:
             continue
         acct = dict(row)
         p = (acct.get("provider") or "oci").lower()
-        if p not in ("oci", "aws"):
+        if p not in ("oci", "aws", "ibm"):
             continue   # DNS 类账户不参与守护
         stats["checked"] += 1
         try:
@@ -178,20 +178,14 @@ def run_once() -> dict:
         running = [r for r in rows if r["state"] == "RUNNING"]
         stopped = [r for r in rows if r["state"] in ("STOPPED", "SOFTSTOPPED")]
 
+        from . import power as power_mod
+
         def _start(r):
-            """按提供商拉起实例。"""
-            if p == "aws":
-                if r.get("service") == "lightsail":
-                    return aws_cloud.lightsail_op(acct, r["region"], r["id"], "START")
-                return aws_cloud.instance_op(acct, r["id"], "START")
-            return oci_client.instance_op(acct, r["compartment_id"], r["id"], "START")
+            """按提供商拉起实例(共享路由)。"""
+            return power_mod.power_op(r, "start")
 
         def _stop(r):
-            if p == "aws":
-                if r.get("service") == "lightsail":
-                    return aws_cloud.lightsail_op(acct, r["region"], r["id"], "STOP")
-                return aws_cloud.instance_op(acct, r["id"], "STOP")
-            return oci_client.instance_op(acct, r["compartment_id"], r["id"], "SOFTSTOP")
+            return power_mod.power_op(r, "stop")
 
         # --- 流量守护(暂仅 OCI,依赖 computeagent 指标) ---
         limit = float(rule.get("traffic_limit_gb") or 0) if p == "oci" else 0
