@@ -246,7 +246,12 @@ def cf_delete_route(account_id: int, zone_id: str, route_id: str):
 @router.get("/dnshe/subdomains")
 def dnshe_subdomains(account_id: int, search: str = "", status: str = ""):
     acct = _require(_get_account(account_id), "dnshe")
-    return dnshe.list_subdomains(acct, search=search, status=status)
+    d = dnshe.list_subdomains(acct, search=search, status=status)
+    # 统一返回 items 供前端使用(兼容旧响应保留 subdomains 字段)
+    return {"items": d.get("subdomains", []),
+            "subdomains": d.get("subdomains", []),
+            "pagination": d.get("pagination", {}),
+            "count": d.get("count", 0)}
 
 
 @router.post("/dnshe/subdomains")

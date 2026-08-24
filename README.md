@@ -4,6 +4,12 @@
 
 ## 🚦 更新日志
 
+### v0.17.1(修复:DNSHE 域名列表空)
+
+- 🐛 修复 DNSHE 子域名接口响应结构与前端不一致:后端 `/api/dnshe/subdomains` 原先返回
+  `{subdomains:[...]}`,前端读取 `items` 导致永远显示「无可用域名」;现已统一返回 `items`
+  (同时保留 `subdomains` 字段兼容)
+
 ### v0.17.0(接入 IBM Cloud)
 
 - ☁️ **IBM Cloud VPC 支持**:账户类型新增 IBM Cloud,填写 IAM API Key + 区域即可
