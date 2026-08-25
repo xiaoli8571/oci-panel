@@ -104,7 +104,11 @@ def _req(acct: dict, method: str, path: str, *, params: dict | None = None,
 # ---------------------------------------------------------------- 实例列表
 
 def list_instances(acct: dict) -> list[dict]:
-    """列出该区域全部 VPC 实例(分页拉全)。"""
+    """列出该区域全部 VPC 实例(分页拉全 + 并行补全网卡/IP 详情)。
+
+    注意:/instances 列表视图的 network_interfaces 只有摘要(无 IP),
+    浮动 IP 与私网 IP 需逐实例调 /instances/{id}/network_interfaces 获取。
+    """
     items: list[dict] = []
     start = None
     while True:
@@ -118,7 +122,63 @@ def list_instances(acct: dict) -> list[dict]:
         if not start:
             break
         start = start.split("start=")[-1].split("&")[0]
+    _enrich_network(acct, items)
     return items
+
+
+def _fetch_nics(acct: dict, instance_id: str) -> list[dict]:
+    """拉取实例全部网卡详情(含 floating_ip / primary_ip)。"""
+    out, start = [], None
+    while True:
+        params = {"limit": 50}
+        if start:
+            params["start"] = start
+        d = _req(acct, "GET", f"/instances/{instance_id}/network_interfaces",
+                 params=params)
+        out += d.get("network_interfaces", [])
+        start = (d.get("next") or {}).get("href", "")
+        if not start:
+            break
+        start = start.split("start=")[-1].split("&")[0]
+    return out
+
+
+def _enrich_network(acct: dict, rows: list[dict]) -> None:
+    """并行补全每台实例的 私网 IP / 浮动公网 IP。单台失败不影响整体列表。"""
+    import concurrent.futures as cf
+
+    from . import config
+
+    def one(row: dict) -> None:
+        try:
+            nics = _fetch_nics(acct, row["id"])
+            if not nics:
+                return
+            # 主网卡优先;无法确定时取挂了浮动 IP 的那块(浮动 IP 必在主网卡上)
+            target = next((n for n in nics if n.get("id") == row.get("vnic_id")), None)
+            if target is None:
+                target = next(
+                    (n for n in nics if (n.get("floating_ip") or {}).get("address")),
+                    nics[0])
+            pri = (target.get("primary_ip") or {}).get("address") or ""
+            fip = target.get("floating_ip") or {}
+            if pri:
+                row["private_ip"] = pri
+            if fip.get("address"):
+                row["public_ip"] = fip["address"]
+                row["_fip_id"] = fip.get("id", "")
+                row["public_lifetime"] = "RESERVED"
+            elif not row.get("public_ip"):
+                # 兼容个别区域列表接口直接返回浮动 IP 的情况:保留已有值
+                row["public_lifetime"] = None
+        except Exception as e:  # noqa: BLE001
+            log.debug("IBM 实例 %s 网卡详情获取失败:%s", row.get("name"), e)
+
+    if not rows:
+        return
+    workers = min(config.MAX_WORKERS, max(len(rows), 2))
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(one, rows))
 
 
 def _row(acct: dict, ins: dict) -> dict:

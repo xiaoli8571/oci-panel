@@ -347,7 +347,7 @@ def lightsail_change_ip(progress, acct: dict, region: str, name: str) -> dict:
 # ================================================================ Lightsail 创建
 
 def lightsail_meta(acct: dict, region: str | None = None) -> dict:
-    """返回指定区域的可用镜像(blueprint)、套餐(bundle)和区域列表。"""
+    """返回指定区域的可用镜像(blueprint)、套餐(bundle)、可用区和区域列表。"""
     region = region or (acct.get("region") or "ap-northeast-1")
     ls = _ls(acct, region)
     blueprints = [{
@@ -367,8 +367,36 @@ def lightsail_meta(acct: dict, region: str | None = None) -> dict:
         "price": b.get("price", 0),
         "monthly_transfer": b.get("monthlyTransferGb", 0),
     } for b in ls.get_bundles().get("bundles", [])]
+    # 该区域可用区列表(Lightsail 创建必填 availabilityZone)
+    zones: list[str] = []
+    try:
+        for r in ls.get_regions(includeAvailabilityZones=True).get("regions", []):
+            if r.get("name") == region:
+                zones = [z.get("zoneName") if isinstance(z, dict) else str(z)
+                         for z in (r.get("availabilityZones") or [])]
+                break
+    except Exception as e:  # noqa: BLE001
+        log.warning("查询 Lightsail 可用区失败(region=%s):%s", region, e)
     return {"region": region, "regions": lightsail_regions(acct),
-            "blueprints": blueprints, "bundles": bundles}
+            "blueprints": blueprints, "bundles": bundles, "zones": zones}
+
+
+def _lightsail_default_az(acct: dict, region: str) -> str:
+    """取该区域第一个可用区。Lightsail create_instances 的 availabilityZone 为必填,
+    用户留空时必须自动补一个,否则 botocore 报 Missing required parameter。"""
+    try:
+        for r in _ls(acct, region).get_regions(
+                includeAvailabilityZones=True).get("regions", []):
+            if r.get("name") != region:
+                continue
+            azs = r.get("availabilityZones") or []
+            if azs:
+                z = azs[0]
+                return z.get("zoneName", "") if isinstance(z, dict) else str(z)
+            break
+    except Exception as e:  # noqa: BLE001
+        log.warning("查询 Lightsail 可用区失败(region=%s):%s", region, e)
+    return ""
 
 
 def lightsail_create(acct: dict, region: str, name: str, blueprint_id: str,
@@ -376,12 +404,17 @@ def lightsail_create(acct: dict, region: str, name: str, blueprint_id: str,
     """创建 Lightsail 实例(异步,数秒后进入 pending,随后 running)。"""
     try:
         ls = _ls(acct, region)
-        kw = {"instanceNames": [name], "blueprintId": blueprint_id, "bundleId": bundle_id}
-        if az:
-            kw["availabilityZone"] = az
+        if not az:
+            az = _lightsail_default_az(acct, region)
+        if not az:
+            raise ProviderError(
+                f"无法自动确定区域 {region} 的可用区,请手动填写可用区(如 {region}a)")
+        kw = {"instanceNames": [name], "blueprintId": blueprint_id,
+              "bundleId": bundle_id, "availabilityZone": az}
         resp = ls.create_instances(**kw)
         ops = resp.get("operations", [])
-        return {"name": name, "region": region, "operations": len(ops),
+        return {"name": name, "region": region, "az": az,
+                "operations": len(ops),
                 "status": (ops[0].get("status") if ops else "started")}
     except (BotoCoreError, ClientError) as e:
         raise _wrap(e) from e

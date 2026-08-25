@@ -4,6 +4,16 @@
 
 ## 🚦 更新日志
 
+### v0.20.1(修复 IBM 公网 IP 不显示 / AWS Lightsail 创建失败)
+
+- 🐛 **IBM Cloud 实例公网 IP 不显示**:`/instances` 列表接口的网卡只有摘要(无 IP),
+  现逐实例并行调 `GET /instances/{id}/network_interfaces` 补全 浮动公网 IP / 私网 IP;
+  换 IP 功能依赖的浮动 IP id 也一并补全;单台查询失败不影响整体列表
+- 🐛 **AWS 创建实例报 Missing required parameter in input: "availabilityZone"**:
+  Lightsail `create_instances` 的可用区是**必填**参数,留空时自动取该区域第一个可用区,
+  不再出现必填校验失败;创建表单「可用区」由手填输入框改为下拉(自动选择/指定区域 AZ),
+  元数据接口新增 `zones` 字段
+
 ### v0.20.0(救援系统)
 
 - 🛟 **实例救援系统**:系统盘损坏 / SSH 进不去 / fstab 改错 / 磁盘占满?一键救援

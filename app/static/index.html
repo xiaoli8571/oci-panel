@@ -697,7 +697,7 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
         </select></div>
       <div id="aws-ls-fields" class="grid2">
         <div><label>区域 *</label><select id="c-awsregion" onchange="onAwsRegion()"></select></div>
-        <div><label>可用区(留空自动分配)</label><input id="c-awsaz" placeholder="如 ap-northeast-1a(可留空)"></div>
+        <div><label>可用区</label><select id="c-awsaz"><option value="">自动选择</option></select></div>
         <div><label>系统镜像 Blueprint *</label><select id="c-blueprint"></select></div>
         <div><label>套餐 Bundle *</label><select id="c-bundle"></select></div>
       </div>
@@ -1277,7 +1277,12 @@ async function loadAwsMeta() {
       || `<option value="">无可用套餐</option>`;
     const sel = d.bundles.find(b => b.price === 0 || b.price <= 5);
     if (sel) $("#c-bundle").value = sel.bundle_id;
-    $("#awsCreateHint").textContent = `区域 ${d.region}:${d.blueprints.length} 个镜像,${d.bundles.length} 个套餐`;
+    const azSel = $("#c-awsaz");
+    const prevAz = azSel.value;
+    azSel.innerHTML = `<option value="">自动选择</option>`
+      + (d.zones || []).map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join("");
+    if ((d.zones || []).includes(prevAz)) azSel.value = prevAz;
+    $("#awsCreateHint").textContent = `区域 ${d.region}:${d.blueprints.length} 个镜像,${d.bundles.length} 个套餐,${(d.zones || []).length} 个可用区`;
   } catch (e) {
     $("#awsCreateHint").textContent = "加载失败:" + e.message;
     $("#c-blueprint").innerHTML = `<option value="">${esc(e.message)}</option>`;
