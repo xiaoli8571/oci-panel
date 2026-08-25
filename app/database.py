@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS ssh_creds(
     auth_type        TEXT DEFAULT 'password',
     secret_enc       TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS rescue_sessions(
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id           INTEGER NOT NULL,
+    compartment_id       TEXT NOT NULL,
+    instance_id          TEXT NOT NULL,
+    instance_name        TEXT DEFAULT '',
+    ad                   TEXT DEFAULT '',
+    boot_volume_id       TEXT NOT NULL,
+    rescue_instance_id   TEXT NOT NULL,
+    rescue_instance_name TEXT DEFAULT '',
+    status               TEXT DEFAULT 'rescuing',
+    created_at           TEXT DEFAULT (datetime('now','localtime')),
+    updated_at           TEXT DEFAULT (datetime('now','localtime'))
+);
 """
 
 
@@ -65,8 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_g_events_acct ON g_events(account_id, kind);
 CREATE INDEX IF NOT EXISTS idx_vps_host ON vps_hosts(host, port);
 """
 
-_conn: sqlite3.Connection | None = None
-_conn_lock = threading.Lock()
+_local = threading.local()
 
 
 def _connect() -> sqlite3.Connection:
@@ -82,18 +95,26 @@ def _connect() -> sqlite3.Connection:
 
 @contextmanager
 def db():
-    """复用单个长连接(加锁串行化写事务),避免每请求重建连接的开销。"""
-    global _conn
-    if _conn is None:
-        with _conn_lock:
-            if _conn is None:
-                config.ensure_dirs()
-                _conn = _connect()
+    """线程本地连接:每线程独立连接 + WAL。
+
+    v0.20.0 修复:原先全局共享单连接,后台任务线程与 Web 线程并发写时,
+    一方的 commit 会提交/清掉另一方未完成的事务,触发
+    「cannot commit - no transaction is active」。改为 thread-local 后各线程
+    事务完全隔离;WAL 允许多读一写,busy_timeout 兜底写竞争。
+    连接随线程结束由 GC 关闭(任务线程均为短生命周期守护线程)。
+    """
+    config.ensure_dirs()
+    conn = getattr(_local, "conn", None)
+    if conn is None:
+        _local.conn = conn = _connect()
     try:
-        yield _conn
-        _conn.commit()
+        yield conn
+        conn.commit()
     except Exception:
-        _conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
         raise
 
 

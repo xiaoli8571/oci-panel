@@ -16,7 +16,7 @@ import urllib.request
 
 import requests
 
-from . import aws_cloud, database, http_pool, oci_client
+from . import aws_cloud, database, http_pool, oci_client, rescue
 from .pcreds import ProviderError
 
 log = logging.getLogger("guardian")
@@ -175,6 +175,14 @@ def run_once() -> dict:
             _record_event(aid, "error", f"巡检失败:{e}")
             continue
 
+        # 救援中的实例:启动盘已卸下,保活拉起/自动关停都可能破坏救援流程,一律跳过
+        rescuing = set()
+        if p == "oci":
+            try:
+                rescuing = rescue.rescuing_instance_ids(aid)
+            except Exception:  # noqa: BLE001
+                pass
+
         running = [r for r in rows if r["state"] == "RUNNING"]
         stopped = [r for r in rows if r["state"] in ("STOPPED", "SOFTSTOPPED")]
 
@@ -200,6 +208,8 @@ def run_once() -> dict:
                     if action == "stop":
                         database.set_kv(f"tgstop:{aid}", dt.date.today().strftime("%Y-%m"))
                         for r in running:
+                            if r["id"] in rescuing:
+                                continue   # 救援中的目标机不动
                             _stop(r)
                             stats["stopped"].append(r["name"])
                             _record_event(aid, "traffic", f"{msg},已自动关停「{r['name']}」", notify=True)
@@ -216,6 +226,10 @@ def run_once() -> dict:
                               "该账号已被流量守护关停,本月保活暂停")
                 continue
             for r in stopped:
+                if r["id"] in rescuing:
+                    _record_event(aid, "keepalive",
+                                  f"「{r['name']}」处于救援会话中,跳过保活拉起")
+                    continue
                 try:
                     _start(r)
                     stats["started"].append(r["name"])

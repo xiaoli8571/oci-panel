@@ -816,6 +816,18 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
   </div>
 </div>
 
+<!-- 救援模式 -->
+<div class="mask" id="rescueModal">
+  <div class="modal wide">
+    <h3>🛟 救援模式 <span id="rescueSub" style="color:var(--muted);font-size:13px"></span></h3>
+    <div id="rescueBody"><p class="empty">加载中…</p></div>
+    <div class="foot">
+      <button class="btn-ghost" onclick="hide('rescueModal')">关闭</button>
+      <button id="rescueGoBtn" style="display:none" onclick="submitRescueStart()">开始救援</button>
+    </div>
+  </div>
+</div>
+
 <!-- 升降配 -->
 <div class="mask" id="resizeModal">
   <div class="modal">
@@ -1117,6 +1129,7 @@ function renderInstances() {
             ? `<button class="btn-cyan" onclick="ibmChangeIp(${idx})">换IP</button>`
             : `<button class="btn-cyan" onclick="openNet(${idx})">网络</button>
                <button class="btn-ghost" onclick="openVol(${idx})">磁盘</button>
+               <button class="btn-ghost" onclick="openRescue(${idx})">🛟 救援</button>
                <button class="btn-purple" onclick="openResize(${idx})">规格</button>
                <button class="btn-ghost" onclick="openRename(${idx})">改名</button>
                <button class="btn-ghost" onclick="showTraffic(${idx})">流量</button>`}
@@ -1698,6 +1711,99 @@ async function saveVol() {
       size_in_gbs: size > v.size_in_gbs ? size : null, vpus_per_gb: vpu }) });
     toast("已应用,块存储异步生效中", "ok"); hide("volModal");
   } catch (e) { toast(e.message, "err"); }
+}
+
+/* ================= 救援系统 ================= */
+let curRescue = null;
+
+async function openRescue(idx) {
+  curRescue = instItems[idx];
+  $("#rescueSub").textContent = "· " + curRescue.name;
+  show("rescueModal");
+  await renderRescue();
+}
+
+async function renderRescue() {
+  const i = curRescue;
+  $("#rescueGoBtn").style.display = "none";
+  $("#rescueBody").innerHTML = `<p class="empty">加载中…</p>`;
+  let metaHtml;
+  try {
+    const d = await api(`/api/rescue/meta?account_id=${i.account_id}&compartment_id=${encodeURIComponent(i.compartment_id)}&instance_id=${encodeURIComponent(i.id)}`);
+    const opts = d.targets.map(t => `<option value="${t.id}">${esc(t.name)} · ${t.public_ip || "无IP"} · ${esc((t.shape || "").replace("VM.Standard.", ""))}</option>`).join("");
+    metaHtml = `
+      <div class="kv">
+        <span>故障实例</span><div><b>${esc(d.instance.name)}</b>(${badge(d.instance.state)}) · AD ${esc(d.instance.ad)}</div>
+        <span>启动盘</span><div>${d.instance.boot_gbs ? d.instance.boot_gbs + " GB" : "?"}</div>
+      </div>
+      <label>救援目标机(同可用域、运行中;修复期间其上会挂载故障盘)</label>
+      ${d.targets.length
+        ? `<select id="r-target">${opts}</select>`
+        : `<p class="hint" style="color:var(--amber)">⚠ 该账户下没有可用救援目标:需要一台与故障实例同一 AD 且正在运行的实例</p>`}
+      <p class="hint">流程:自动关停故障实例 → 卸下启动盘 → 挂载到目标机 → 你经 Web SSH 在目标机上修复文件(改密码/修 fstab/清磁盘等)→ 点「完成还原」自动装回并开机。全程约 5~10 分钟。</p>`;
+    $("#rescueBody").innerHTML = metaHtml;
+    $("#rescueGoBtn").style.display = d.targets.length ? "" : "none";
+  } catch (e) {
+    $("#rescueBody").innerHTML = `<p class="empty">加载失败:${esc(e.message)}</p>`;
+  }
+  // 进行中的救援会话
+  let sessions = [];
+  try { sessions = (await api("/api/rescue/sessions")).items || []; } catch (e) {}
+  const mine = sessions.filter(s => s.account_id === i.account_id);
+  if (!mine.length) return;
+  const cheat = `# 在目标机上执行
+lsblk                        # 找到新磁盘,通常是 /dev/sdb
+mount /dev/sdb1 /mnt         # 无分区则 mount /dev/sdb /mnt
+# --- 常见修复(示例)---
+# chroot 改 root 密码:
+#   for d in dev proc sys run; do mount --bind /$d /mnt/$d; done && chroot /mnt passwd root
+# 修 fstab / sshd 配置: vi /mnt/etc/fstab
+# 清理磁盘大文件:       du -xh --max-depth=2 /mnt | sort -rh | head
+# --- 修复完成后必须卸载 ---
+umount -R /mnt               # 有多个 bind 挂载也要全部卸载`;
+  const sessHtml = `<div class="sec"><h4>🛟 救援会话(本账户)</h4>` + mine.map(s => {
+    const active = s.status === "rescuing";
+    return `<div style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div><b>${esc(s.instance_name)}</b> <span style="color:var(--muted);font-size:12px">的系统盘挂在</span> <b>${esc(s.rescue_instance_name)}</b>
+          ${active ? '<span class="badge b-busy">救援中</span>' : '<span class="badge b-run">已还原</span>'}
+          <br><span style="color:var(--muted);font-size:12px">${esc(s.created_at)} · AD ${esc(s.ad || "")}</span></div>
+        <div style="display:flex;gap:6px">
+          ${active ? `<button class="btn-green" onclick="rescueFinish(${s.id},'${esc(s.instance_name)}')">完成还原</button>` : ""}
+          <button class="btn-ghost" onclick="rescueForget(${s.id})">删除记录</button>
+        </div>
+      </div>
+      ${active ? `<pre class="log" style="margin-top:8px">${esc(cheat)}</pre>` : ""}
+    </div>`;
+  }).join("") + `</div>`;
+  $("#rescueBody").innerHTML += sessHtml;
+}
+
+async function submitRescueStart() {
+  const sel = $("#r-target");
+  if (!sel || !sel.value) return toast("请选择救援目标机", "err");
+  const i = curRescue;
+  if (!confirm(`确认开始救援「${i.name}」?\n\n· 故障实例将被关机并卸下启动盘\n· 启动盘将挂载到所选目标机上\n· 过程约 3~5 分钟`)) return;
+  try {
+    const d = await api("/api/rescue/start", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, compartment_id: i.compartment_id,
+      instance_id: i.id, rescue_instance_id: sel.value }) });
+    hide("rescueModal");
+    openJob("🛟 救援 · " + i.name, d.job_id, () => loadInstances());
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function rescueFinish(sid, name) {
+  if (!confirm(`确认已在目标机上完成修复并卸载(umount)所有挂载点?\n\n随后将自动:从目标机分离启动盘 → 装回「${name}」→ 开机。`)) return;
+  api("/api/rescue/finish", { method: "POST", body: JSON.stringify({ session_id: sid }) })
+    .then(d => { hide("rescueModal"); openJob("🛟 还原 · " + name, d.job_id, () => loadInstances()); })
+    .catch(e => toast(e.message, "err"));
+}
+
+async function rescueForget(sid) {
+  if (!confirm("删除该救援记录?(仅删除面板记录,不影响云端资源)")) return;
+  try { await api("/api/rescue/forget", { method: "POST", body: JSON.stringify({ session_id: sid }) }); renderRescue(); }
+  catch (e) { toast(e.message, "err"); }
 }
 
 /* ================= 规格 / 改名 / 终止 ================= */

@@ -117,6 +117,18 @@ class VolumeUpdateReq(BaseModel):
     vpus_per_gb: int | None = None
 
 
+class RescueStartReq(BaseModel):
+    """发起实例救援:把故障实例启动盘挂到 rescue_instance_id 上修复。"""
+    account_id: int
+    compartment_id: str
+    instance_id: str
+    rescue_instance_id: str
+
+
+class RescueFinishReq(BaseModel):
+    session_id: int
+
+
 class GuardianRule(BaseModel):
     account_id: int
     enabled: bool = False
