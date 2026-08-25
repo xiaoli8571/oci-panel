@@ -4,6 +4,11 @@
 
 ## 🚦 更新日志
 
+### v0.19.1(修复 IBM VPC API 必填 version 参数)
+
+- 🐛 IBM Cloud 所有 VPC API 请求自动附加 `version=YYYY-MM-DD` 与 `generation=2`,
+  修复「validation_failed_query_parameter: version must be YYYY-MM-DD」错误
+
 ### v0.19.0(IBM Cloud 创建/终止)
 
 - ☁️ **IBM Cloud 补齐创建与终止**:

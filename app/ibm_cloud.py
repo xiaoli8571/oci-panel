@@ -19,6 +19,10 @@ log = logging.getLogger("ibm")
 _IAM = "https://iam.cloud.ibm.com/identity/token"
 _token_cache: dict[str, tuple[float, str]] = {}   # key: api_key hash → (expire_ts, token)
 
+# IBM VPC API 强制要求 version 与 generation 查询参数
+_IBM_VERSION = "2023-01-01"
+_IBM_GENERATION = "2"
+
 
 def _api_key(acct: dict) -> str:
     key = (extra_creds(acct).get("ibm_api_key") or "").strip()
@@ -61,6 +65,10 @@ def _req(acct: dict, method: str, path: str, *, params: dict | None = None,
          json_body: dict | None = None, retry_auth: bool = True) -> dict:
     api_key = _api_key(acct)
     url = _base(acct) + path
+    # 合并 VPC API 必填参数(version/generation)
+    params = dict(params or {})
+    params.setdefault("version", _IBM_VERSION)
+    params.setdefault("generation", _IBM_GENERATION)
     try:
         r = http_pool.request(method, url,
                               params=params,
