@@ -22,7 +22,7 @@ def session() -> requests.Session:
                 adapter = HTTPAdapter(pool_connections=8, pool_maxsize=32)
                 s.mount("https://", adapter)
                 s.mount("http://", adapter)
-                s.headers["User-Agent"] = "oci-panel"
+                s.headers["User-Agent"] = "clouddeck"
                 _session = s
     return _session
 

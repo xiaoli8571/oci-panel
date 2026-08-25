@@ -1,201 +1,122 @@
-# OCI Manage Lite · Oracle Cloud 轻量管理面板
+# 🛞 CloudDeck · 云驭 — 轻量自托管多云管理面板
 
-仿照 [semicons/java_oci_manage](https://github.com/semicons/java_oci_manage)(R探长)实现的 **Oracle Cloud (OCI) 网页管理面板**,使用 Python (FastAPI) + 原生前端实现,单文件部署、无外部数据库依赖。
+> **原 OCI Manage Lite**,现已成长为覆盖 **Oracle Cloud / AWS / IBM Cloud** 的轻量自托管多云面板。
+> Python (FastAPI) + 原生前端,单容器部署、无外部数据库依赖、代码全开源可审计。
 
-## 🚦 更新日志
+`self-hosted` `oracle-cloud` `aws` `ibm-cloud` `cloudflare` `vps` `web-ssh` `sftp` `telegram-bot` `fastapi`
 
-### v0.20.2(IBM 公网 IP 探测强化 + 诊断接口)
+---
 
-- 🔍 **IBM 公网 IP 三数据源交叉补全**:区域浮动 IP 表(`/floating_ips` 按 target 网卡索引)
-  → 单网卡详情(`GET /instances/{id}/network_interfaces/{nic}` 权威 floating_ip)
-  → 实例详情兜底主网卡 ID;任一命中即用,互相兜底;补全结果输出到面板日志
-- 🩺 **新增诊断接口** `GET /api/ibm/net-debug?account_id=&instance_id=`:
-  返回实例状态/主网卡/网卡详情/区域浮动 IP 原始数据,浏览器已登录直接打开即可排查
-- ℹ️ **重要说明**:IBM VPC 与 AWS 不同,**创建实例不会自动分配公网 IP**,
-  必须绑定浮动 IP。若实例本来就没绑,列表显示「-」是正常的——点该行「换IP」
-  即可自动分配并绑定一个新的浮动公网 IP
+## ✨ 功能总览
 
-### v0.20.1(修复 IBM 公网 IP 不显示 / AWS Lightsail 创建失败)
+### ☁️ 多云实例管理
 
-- 🐛 **IBM Cloud 实例公网 IP 不显示**:`/instances` 列表接口的网卡只有摘要(无 IP),
-  现逐实例并行调 `GET /instances/{id}/network_interfaces` 补全 浮动公网 IP / 私网 IP;
-  换 IP 功能依赖的浮动 IP id 也一并补全;单台查询失败不影响整体列表
-- 🐛 **AWS 创建实例报 Missing required parameter in input: "availabilityZone"**:
-  Lightsail `create_instances` 的可用区是**必填**参数,留空时自动取该区域第一个可用区,
-  不再出现必填校验失败;创建表单「可用区」由手填输入框改为下拉(自动选择/指定区域 AZ),
-  元数据接口新增 `zones` 字段
+| 能力 | 说明 |
+|---|---|
+| 🖥 实例总览 | 多账户/多区域并行扫描,stale-while-revalidate 缓存;状态、公网 IP(临时/保留)、私网 IP、规格、启动盘一览 |
+| ⏻ 电源操作 | 启动 / 软关机 / 强制关机 / 重启(OCI · AWS EC2/Lightsail · IBM VPC) |
+| 🔄 换公网 IP | 一键换临时 IP(OCI 自动关开机;AWS/IBM 释放重申);可选联动 Cloudflare A 记录自动更新 |
+| 🌐 IPv6 / 保留 IP | OCI IPv6 一键附加;保留公网 IP 新建/删除/绑定/解绑 |
+| 🔓 端口开放 | 一键向安全列表追加 TCP 入站规则(22/80/443/自定义,IPv4+IPv6) |
+| 💽 卷管理 | 启动盘扩容、VPU 性能层级(Balanced/Better/Ultra) |
+| 🔧 规格与属性 | A1.Flex 升降配、实例改名、终止(可选保留启动盘) |
+| ⚖️ 配额体检 | A1 核数/内存/E2.Micro 在各 AD 的用量余量、订阅类型识别、一键降配 |
 
-### v0.20.0(救援系统)
+### 🚀 创建实例
 
-- 🛟 **实例救援系统**:系统盘损坏 / SSH 进不去 / fstab 改错 / 磁盘占满?一键救援
-  - 原理:自动关停故障实例 → 卸下启动盘 → 以数据盘挂载到**同可用域**的健康实例
-    → 你经 Web SSH 在目标机上修复文件(chroot 改密码、修 fstab、清磁盘、补 SSH Key)
-    → 点「完成还原」自动装回启动盘并开机
-  - OCI 实例行新增「🛟 救援」按钮:弹窗选择目标机(自动列出同 AD 运行中的实例)、
-    任务窗口实时日志、内置修复命令速查;救援会话持久化,中途关面板也不丢状态
-  - 防呆保护:目标机必须运行且同 AD 校验;软关机超时自动转强制关机;
-    分离/挂载/开机全程等待并校验状态;还原前校验原实例必须处于关机
-  - 与守护中心联动:救援会话中的实例不会被保活自动拉起、不会被流量守护误关停
+- **Oracle Cloud**:AMD 微型 / ARM A1 一键预设,**强开 ARM**(容量不足自动重试,次数间隔可调);镜像/子网/AD 可选;**从现有启动盘开机**
+- **AWS**:EC2(区域→AMI→实例类型→子网→安全组→密钥对)与 Lightsail(区域→可用区→Blueprint→Bundle)全生命周期
+- **IBM Cloud**:VPC → 子网 → 镜像(公开+私有)→ Profile → SSH Key → 可用区
 
-### v0.19.1(修复 IBM VPC API 必填 version 参数)
+### 🛟 救援系统(特色)
 
-- 🐛 IBM Cloud 所有 VPC API 请求自动附加 `version=YYYY-MM-DD` 与 `generation=2`,
-  修复「validation_failed_query_parameter: version must be YYYY-MM-DD」错误
+系统盘损坏 / SSH 进不去 / fstab 改错 / 磁盘占满?一键救援:
 
-### v0.19.0(IBM Cloud 创建/终止)
+```
+关停故障实例 → 卸下启动盘 → 数据盘方式挂到同 AD 健康实例
+→ Web SSH 登录目标机修复(chroot 改密码 / 修 fstab / 清磁盘)
+→ 「完成还原」自动装回启动盘并开机
+```
 
-- ☁️ **IBM Cloud 补齐创建与终止**:
-  - 创建实例:选择 VPC → 子网(按 VPC 过滤)→ 镜像(公开+私有)→ Profile(CPU/内存)→ SSH Key → 可用区
-  - 终止实例:实例行「终止」按钮对 IBM 生效(直接删除 VPC 实例)
-  - 后端新增 `ibm_meta` / `create_instance` / `terminate_instance`,路由 `/api/ibm/meta|create|terminate`
-  - 前端创建弹窗新增 IBM 平台与完整字段;账户下拉含 IBM
-- mock 单测覆盖元数据/创建/终止全通过
+软关机超时自动强停、全程状态校验防呆、会话持久化(中途关面板不丢)、
+与守护中心联动(救援中的实例不会被保活拉起)。
 
-### v0.18.0(AWS EC2 创建补齐)
+### 💻 远程运维
 
-- ☁️ **AWS 接入完善**:在原有 EC2 全区域扫描/电源/换IP 与 Lightsail 全生命周期基础上,
-  新增 **EC2 云服务器创建**:
-  - 创建弹窗 AWS 模式增加「EC2 / Lightsail」切换
-  - EC2 创建:选择区域 → AMI(Amazon 官方最新 20 个)→ 实例类型(t2/t3/t4g/m5/c5/r5 等)
-    → 子网(默认/指定)→ 安全组(默认/指定)→ Key Pair(可空)
-  - 后端 `ec2_meta` / `ec2_create`;创建后自动打 Name 标签
-- 至此 AWS 接入完整:EC2 + Lightsail 的 创建/列表/电源/换IP/终止 全部可用
+- **Web SSH**:浏览器多标签终端(xterm.js),密码/私钥认证,主机指纹 TOFU 校验,云主机一键导入
+- **SFTP 文件管理**:浏览/上传/下载/重命名/删除/新建目录,单文件 ≤50MB
+- **SSH 批量命令**:多台并行执行,逐台展示退出码与输出
+- **凭据库**:SSH/SFTP 凭据加密保存,免重复输入
 
-### v0.17.1(修复:DNSHE 域名列表空)
+### 🛡 守护中心
 
-- 🐛 修复 DNSHE 子域名接口响应结构与前端不一致:后端 `/api/dnshe/subdomains` 原先返回
-  `{subdomains:[...]}`,前端读取 `items` 导致永远显示「无可用域名」;现已统一返回 `items`
-  (同时保留 `subdomains` 字段兼容)
+- **停机保活**:停机实例自动拉起(可按账户开关)
+- **月流量守护**:超阈值通知或自动关停(被关停账号当月不保活)
+- **事件历史** + Webhook 通知(Telegram / Bark / Server酱)
+- **定时任务**:按每日时间(可选星期)自动 开机/关机/重启,30 秒粒度、同刻去重、试执行
 
-### v0.17.0(接入 IBM Cloud)
+### 🌐 DNS 与域名
 
-- ☁️ **IBM Cloud VPC 支持**:账户类型新增 IBM Cloud,填写 IAM API Key + 区域即可
-  - 实例列表(分页拉全,状态/公网浮动IP/私网IP/规格/可用区)
-  - 电源操作(开机/关机/重启)、换公网浮动IP(释放旧IP→申请新IP→绑定主网卡)
-  - 测活诊断、守护中心保活、TG Bot 电源与换IP、定时任务全部兼容
-  - 前端:账户表单 IBM 选项、实例表 IBM 徽标/操作按钮(换IP/电源)、创建页不含 IBM(暂不支持创建)
-- 实现细节:纯 REST(无需 SDK),IAM Token 缓存,401 自动重试;单测 mock 覆盖列表/分页/换IP
+- **Cloudflare**:域名/记录增删改查、Workers 部署与管理、Git 仓库一键部署 Worker、路由绑定
+- **HE.net / DNSHE**:记录管理、DDNS 接口
+- **域名 & SSL 到期监控**:RDAP + TLS 握手双检测,≤30/14/7/3/1 天分档推送(Telegram/Webhook)
 
-### v0.16.0(从启动盘开机 + TG 换IP增强)
+### 🗄 其他
 
-- 💾 **从现有启动盘开机**(R探长同款):创建实例弹窗新增「从启动盘开机」模式——
-  选择 AVAILABLE 状态的启动盘,自动匹配同 AD、带出规格,一键用旧系统盘拉起新实例
-  (适合:终止实例时保留启动盘后重新上机 / 换形状复用系统)
-- 🤖 **TG `/reip` 增强**:支持 AWS(EC2 stop/start、Lightsail),OCI 走后台任务防超时
+- **对象存储**:OCI 桶与对象管理(浏览/上传 ≤50MB/下载/删除)
+- **📈 流量统计**:`oci_computeagent` 指标,24h/7d/30d 图表
+- **🤖 Telegram Bot**:`/status` `/list` `/ip` `/on` `/off` `/reboot` `/reip` `/open` `/quota` `/dom` `/stats` 等指令遥控
+- **📜 操作审计**:全部 API 写操作留痕,账户页可查询过滤
+- **⬆ 版本检查** / **☀️ 浅深主题**(跟随系统) / **healthz 健康检查**
 
-### v0.15.0(定时任务 + 资源监控 + CI)
+## 🆕 更新日志
 
-- ⏰ **定时任务**:守护中心新增;按每日时间(可选星期)自动 开机/关机/重启 实例,
-  30 秒粒度检查、同刻去重、支持一键启停与试执行;适合流量窗口管理/定时保活
-- 📊 **VPS 资源监控**:手动添加的 VPS 行新增「📊 资源」按钮,CPU/内存/磁盘进度条 + 运行时长;
-  TG Bot 同步支持 `/stats <VPS名>`;电源操作重构为共享模块(TG/定时任务复用)
-- 🐳 **CI/CD**:GitHub Actions 自动语法检查 + 构建发布 GHCR 镜像
-  (`docker run ghcr.io/xiaoli8571/oci-panel:latest` 免构建部署)
-- 🖼 内置 favicon(消除 404)
+### v0.21.0(品牌升级:CloudDeck)
 
-### v0.14.0(TG Bot 增强 + 操作审计 + 更新检查)
+- 🛞 面板更名为 **CloudDeck(云驭)**,原 OCI Manage Lite;功能不变,数据目录无缝兼容
+- 全部品牌触点更新:登录页/顶栏/标题、TG 测试消息、User-Agent、compose 服务名、镜像路径
+- 内置版本检查指向新仓库 `xiaoli8571/clouddeck`
 
-- 🤖 **TG Bot 新指令**:`/reip <名称>` 远程换公网 IP(实时进度)、`/open <名称> <端口>` 一键放行 TCP 端口
-- 📜 **操作审计日志**:自动记录全部 API 写操作(方法/路径/状态码/耗时/来源IP),账户设置页可查询过滤;
-  只记元数据不落请求体,避免敏感信息入库;超 5000 条自动清理
-- ⬆ **新版本检查**:后台每 6 小时查 GitHub 最新 release,顶栏出现「⬆ 新版可用」徽标
+### v0.20.x(救援系统 + 多云修复)
 
-### v0.13.0(对象存储 + 可开机器数检测)
-
-- 🗄 **OCI 对象存储管理**:云与域名页新增卡片
-  - 桶:列出/新建(Standard/Archive)/删除;30s 缓存
-  - 对象:浏览(前缀目录式导航)、上传(FileReader base64 中转,≤50MB)、浏览器直链下载、删除
-- 🔢 **可开机器数检测**:A1 体检升级,每个 AD 直接给出「还能开 N 台 A1(2C/12G)、M 台 E2.Micro」,
-  抢机前先看余量
-
-### v0.12.0(Telegram Bot 控制 + A1 配额体检)
-
-- 🤖 **Telegram Bot 指令控制**(对标 R探长 核心能力):在守护中心启用后,直接在 TG 里管理服务器
-  - 指令:`/status` `/list` `/ip` `/on` `/off` `/reboot` `/quota` `/dom` `/guard` `/ping` `/help`
-  - 名称模糊匹配 / IP 精确匹配;多台命中给序号候选(`/on 2`)
-  - 支持 OCI(EC2/Lightsail 同理 AWS);仅响应配置的 Chat ID,其他会话忽略
-  - 长轮询独立线程,offset 持久化,重启不重复处理积压消息
-- 🩺 **A1 配额体检**:一键扫描所有 OCI 账户各 AD 的 A1 核/内存余量 + 在跑 A1.Flex 实例清单,
-  支持一键降配(1C6G / 2C12G)腾出免费额度(降配需实例先关机)
-
-### v0.11.1(浅色主题)
-
-- ☀️ **浅色主题**:顶栏新增主题切换按钮;默认跟随系统 `prefers-color-scheme`,手动选择后记忆于浏览器
-- 全部界面配色变量化(输入框/表格悬停/遮罩/日志区/登录页渐变/toast 阴影),浅深两套调色板
-- Web SSH 终端(xterm.js)与流量图表跟随主题即时换肤/重绘
-
-### v0.11.0(对标 R探长:自动化运维三件套)
-
-- 🔁 **换 IP 自动更新 Cloudflare DNS**(R探长同款联动):换 IP 弹窗可选填「域名 记录名」,新 IP 生效后自动更新/创建 A 记录,任务日志可见结果
-- 🌐 **域名 & SSL 证书到期监控**:守护中心新增监控清单;每 6 小时经 RDAP 查域名注册到期、TLS 握手读证书到期;剩余 ≤30/14/7/3/1 天分档推送 Telegram/Webhook(每档每日最多提醒一次);支持一键立即检测
-- ⚡ **SSH 批量命令**:实例页新增「批量命令」;候选主机自动汇总手动 VPS + 凭据库已保存凭据,多台并行执行、逐台展示退出码与输出(截断 8KB)
-
-### v0.10.0(性能优化 + 稳定性修复)
-
-**性能**
-- 实例总览:多账户并行扫描;单实例 VNIC/启动盘/保留IP 判定并行化,大账户列表提速数倍
-- 缓存升级 stale-while-revalidate:过期请求秒回旧数据 + 后台自动刷新(`?refresh=1` 强制刷新);`INSTANCE_CACHE_TTL` 可调
-- OCI SDK / boto3 / Lightsail 客户端缓存复用(免重复解密私钥、解析 PEM、构建客户端)
-- 创建实例表单元数据(区间/AD/镜像/子网)TTL 缓存(`META_CACHE_TTL`)
-- 配额查询、流量指标、CF Workers 列表等独立 API 调用并行发出
-- SQLite 启用 WAL 模式 + 连接复用,Web 与守护线程并发不再互相阻塞;新增事件表索引
-- HTTP 连接池(Cloudflare/DNSHE/Telegram/Webhook 复用 TLS 连接)
-- 响应 GZip 压缩(首页 125KB→32KB);静态资源浏览器缓存 24h;xterm.js 改为首次打开 SSH 时懒加载
-
-**修复**
-- 🔴 「一键开放端口」因变量未定义必然报错的 bug
-- 🔴 Web SSH 首次连接确认指纹后未保存,导致每次都弹确认框(TOFU 记录失效)
-- 换 IP 后立即读取公网 IP 可能为空,现轮询等待分配
-- 任务日志加长度上限与并发快照,长任务不再撑爆内存
-- 登录防爆破记录定期清理;Cookie 支持 `COOKIE_SECURE=auto`(HTTPS 自动加 Secure)
-
-**运维**
-- 新增 `/healthz` 健康检查;Dockerfile 与 docker-compose 内置 HEALTHCHECK
+- 🛟 v0.20.0 实例救援:故障盘跨实例挂载离线修复,完成自动装回开机
+- 🐛 v0.20.1/v0.20.2:IBM 公网 IP 三数据源交叉补全(区域浮动IP表/单网卡详情/主网卡兜底)+ `/api/ibm/net-debug` 诊断接口;AWS Lightsail 创建必填可用区自动补全(AZ 下拉选择)
 
 ### 历史
 
-- v0.9.3:修复 CF 删除记录 405(record_id 字段映射)+ SSH/SFTP 弹窗自动带出已存用户名
-- v0.9.2:SSH/SFTP 凭据可保存(加密凭据库),云实例免重复输密码
-- v0.9.1:手动添加 VPS 统一纳管 + SSH/SFTP 融入实例行 + 页面大合并(7页→4页)
-- v0.9.0:多云管理面板(OCI/AWS/Cloudflare/DNSHE), Web SSH 轻量版, CF Git 部署
+<details>
+<summary>展开完整更新历史</summary>
 
-## ✨ 功能
+- v0.19.x:IBM Cloud 补齐创建/终止;IBM VPC API version 参数修复
+- v0.18.0:AWS EC2 创建补齐,AWS 接入完整(EC2+Lightsail 全生命周期)
+- v0.17.0:接入 IBM Cloud VPC(列表/电源/换IP);DNSHE 子域名列表修复
+- v0.16.0:从启动盘开机(R探长同款);TG /reip 增强
+- v0.15.0:定时任务 + VPS 资源监控 + CI/CD(GHCR 镜像发布)
+- v0.14.0:TG Bot 增强(reip/open)+ 操作审计 + 新版本检查
+- v0.13.0:OCI 对象存储管理 + 可开机器数检测
+- v0.12.0:Telegram Bot 指令控制 + A1 配额体检
+- v0.11.x:浅色主题;换IP联动CF DNS;域名&SSL监控;SSH 批量命令
+- v0.10.0:性能大优化(并行扫描/SWR缓存/WAL/连接池/GZip)+ 稳定性修复
+- v0.9.x:多云接入(Cloudflare/DNSHE/AWS)、Web SSH+SFTP、凭据库、手动VPS纳管、页面合并
 
-| 功能 | 说明 |
-|---|---|
-| 🔐 面板登录 | 密码登录(HMAC 会话 Cookie),失败防爆破锁定 |
-| 👤 多账户管理 | 支持添加多个 OCI 账户 / 区域;API 私钥 **加密后** 存储在本机 |
-| 🖥 实例总览 | 自动枚举所有区间(Compartment)中的实例:状态、公网 IP(临时/保留标识)、私网 IP、OCPU/内存、启动盘大小 |
-| 🚀 创建实例 | AMD 微型 1C/1G、ARM A1 一键预设;镜像/子网/AD 可选;**强开 ARM**(容量不足自动重试,次数/间隔可调),任务窗口实时日志 |
-| ⏻ 电源操作 | 启动 / 软关机 / 强制关机 / 重启 |
-| 🔄 IP 管理 | 一键换临时 IP(自动关开机);**保留公网 IP** 新建/删除/绑定/解绑;IPv6 一键附加 |
-| 🔓 端口开放 | 一键向安全列表追加 TCP 入站规则(22/80/443/自定义,IPv4+IPv6 全网段) |
-| 💽 卷管理 | 启动盘扩容、VPU 性能层级调整(Balanced/Better/Ultra) |
-| 🔧 规格与属性 | 升降配(A1.Flex OCPU/内存)、实例改名、终止(可选保留启动盘) |
-| 🛟 救援系统 | 系统盘挂到同 AD 健康实例离线修复(chroot 改密码/修 fstab/清磁盘),完成后自动装回开机;救援期间保活联动跳过 |
-| 📊 配额订阅 | A1 核数/内存、E2.Micro 数量在各 AD 的用量与余量;免费层/PAYG 订阅类型识别 |
-| 📈 流量统计 | `oci_computeagent` 监控指标,24 小时 / 7 天 / 30 天切换,聚合粒度自适应 |
-| 🛡 守护中心 | 停机自动拉起(保活);月流量超限通知 / 自动关停(被关停账号当月不保活);事件历史;Webhook 通知(Telegram/Bark/Server酱,支持 `{msg}` 占位) |
-| 💻 Web SSH | 浏览器多标签终端(xterm.js),密码/私钥认证,主机指纹 TOFU 校验,云主机一键导入;凭据仅存浏览器 |
-| 📁 SFTP 文件管理 | 浏览/上传/下载/重命名/删除/新建目录,单文件上限 50MB |
+</details>
 
 ## 🚀 快速开始
 
 ### 方式一:预构建镜像(最简)
 
 ```bash
-docker run -d --name oci-panel -p 8080:8080 \
+docker run -d --name clouddeck -p 8080:8080 \
   -e PANEL_PASSWORD=yourpassword -v ./data:/app/data \
-  ghcr.io/xiaoli8571/oci-panel:latest
+  ghcr.io/xiaoli8571/clouddeck:latest
 ```
 
-> 若提示 manifest 不可见,请到 GitHub → 你的头像 → Packages → oci-panel → Package settings 改为 Public;
-> 或继续用下面的 compose 自建。
+> 若提示 manifest 不可见,请到 GitHub → 你的头像 → Packages → clouddeck → Package settings 改为 Public。
 
 ### 方式二:Docker Compose 自建
 
 ```bash
-git clone https://github.com/xiaoli8571/oci-panel.git && cd oci-panel
+git clone https://github.com/xiaoli8571/clouddeck.git && cd clouddeck
 PANEL_PASSWORD=yourpassword docker compose up -d
 ```
 
@@ -209,13 +130,6 @@ PANEL_PASSWORD=yourpassword python -m uvicorn app.main:app --host 0.0.0.0 --port
 ```
 
 > 若不设置 `PANEL_PASSWORD`,首次启动会自动生成随机密码并打印在日志中,请及时查看并修改。
-
-### 方式四:服务器常驻(systemd)
-
-```bash
-# 已在目标服务器 /opt/oci-panel 部署时可使用 systemd 管理
-docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
-```
 
 ## ⚙️ 环境变量
 
@@ -231,69 +145,63 @@ docker compose -f /opt/oci-panel/docker-compose.yml up -d --build
 
 ## 🔒 安全说明
 
-- OCI API 私钥:Fernet 加密落库(`data/master.key` 为密钥,**务必备份且勿泄露**)
-- 面板会话:HMAC 签名 Cookie,7 天有效
-- SSH 主机指纹:首次连接确认后记录于 `data/known_hosts.json`,变更即告警(MITM 检测)
-- SSH/SFTP 凭据:只保存在用户浏览器 localStorage 或会话内存,面板服务器不存储
+- 云厂商 API 私钥:Fernet 加密落库(`data/master.key` 为密钥,**务必备份且勿泄露**)
+- 面板会话:HMAC 签名 Cookie,7 天有效;失败防爆破锁定
+- SSH 主机指纹:TOFU 记录于 `data/known_hosts.json`,变更即告警(MITM 检测)
+- SSH/SFTP 凭据:仅存用户浏览器 localStorage 或加密凭据库
+- 数据全部位于本机 `data/`(SQLite),备份该目录即完成迁移
 
-## 🔑 如何获取 OCI API 凭证
+## 🔑 如何获取云厂商凭证
 
-1. 登录 [OCI 控制台](https://cloud.oracle.com) → 右上角头像 → **我的个人资料 / User Settings**
-2. 左侧 **API 密钥(API Keys)** → **添加 API 密钥**,生成或上传密钥后记下:
-   - 指纹(Fingerprint)
-   - 租户 OCID(Tenancy OCID)
-   - 用户 OCID(User OCID)
-   - 下载的私钥 PEM 文件内容
-3. 在面板 **账户设置 → 添加账户** 中填入以上信息与目标区域(如 `ap-seoul-1`)。
+- **Oracle Cloud**:控制台 → 头像 → 我的个人资料 → API 密钥 → 添加,记下 tenancy/user OCID、指纹并下载 PEM 私钥
+- **AWS**:IAM 用户 → 创建访问密钥(Access Key ID / Secret);建议仅授予 EC2/Lightsail 必要权限
+- **IBM Cloud**:Manage → Access (IAM) → API keys 创建;区域填如 `us-south` / `eu-de` / `jp-tok`
+- **Cloudflare / DNSHE / HE.net**:对应控制台获取 API Token / 密钥
 
-> 同一账号要管理多个区域时,为每个区域各添加一条记录即可。
-> 建议为该 API Key 的用户仅授予必要的 IAM 策略权限。
+多区域管理:每个区域各添加一条账户记录即可。
 
 ## ❓常见问题
 
-- **列表加载报 401/NotAuthenticated**:检查 tenancy/user OCID、指纹、私钥是否匹配,以及用户是否被解锁。
-- **流量图表为空**:需在实例中启用 Oracle Cloud Agent 的 *Compute Instance Monitoring* 插件。
-- **更换 IP 后连不上**:新 IP 已在任务日志中显示;若使用保留 IP 请先解绑。
-- **数据存放在哪**:全部位于 `data/`(SQLite + 加密私钥 + 主密钥),备份该目录即完成迁移。⚠️ 请勿泄露 `data/master.key`。
+- **OCI 列表报 401/NotAuthenticated**:检查 tenancy/user OCID、指纹、私钥是否匹配
+- **流量图表为空**:需启用 Compute Instance Monitoring 插件(面板有开关)
+- **IBM 实例没有公网 IP**:IBM VPC 不会自动分配公网 IP,点「换IP」即可分配并绑定浮动 IP;排查接口:`GET /api/ibm/net-debug?account_id=&instance_id=`
+- **AWS Lightsail 创建失败提示 availabilityZone**:v0.20.1 起已自动补全,创建表单也可手动指定
+- **数据存放在哪**:`data/`(SQLite + 加密私钥 + 主密钥)
 
 ## 🆚 与 R探长(java_oci_manage)对比
 
-| 能力 | oci-panel | R探长 |
+| 能力 | CloudDeck | R探长 |
 |---|---|---|
 | OCI 实例/网络/卷/配额管理 | ✅ | ✅ |
+| AWS EC2/Lightsail 管理 | ✅ 完整 | ✅ 更全 |
+| IBM Cloud VPS 管理 | ✅ | ❌ |
 | 创建实例强开 ARM(容量重试) | ✅ | ✅ |
 | 换 IP / IPv6 / 保留 IP | ✅ | ✅ |
-| 换 IP 自动更新 CF DNS | ✅ v0.11 | ✅ |
+| 换 IP 自动更新 CF DNS | ✅ | ✅ |
 | 流量统计 / 超限关停 / 停机保活 | ✅ | ✅ |
-| 域名 & SSL 到期监控提醒 | ✅ v0.11 | ✅ |
-| Web SSH + SFTP | ✅ | ✅ |
-| SSH 批量命令 | ✅ v0.11 | ✅ |
-| AWS EC2/Lightsail 管理 | ✅ 基础 | ✅ 更全 |
-| Cloudflare DNS/Workers | ✅ | ✅ DNS |
-| 部署形态 | 单容器 · 无外部依赖 · 开源可审计 | 双端架构(TG Bot+客户端)· 闭源二进制 |
-| Telegram Bot 指令控制 | ✅ v0.12(指令子集) | ✅ 更全 |
+| 域名 & SSL 到期监控提醒 | ✅ | ✅ |
+| Web SSH + SFTP + 凭据库 | ✅ | ✅ |
+| SSH 批量命令 | ✅ | ✅ |
+| 救援模式(启动盘跨实例挂载) | ✅ | ❌ |
+| Cloudflare DNS/Workers/Pages | ✅ | ✅ 仅DNS |
+| Telegram Bot 指令控制 | ✅ | ✅ 更全 |
 | GCP/Azure/DO/SolusVM/VirtFusion | ❌ 暂不支持 | ✅ |
-| 串行控制台 / 对象存储 / ACME 证书 | ❌ 暂不支持 | ✅ |
-| A1 配额体检与降配抢占 | 部分(配额查询已有) | ✅ |
+| 部署形态 | 单容器 · 无外部依赖 · 开源可审计 | 双端架构(TG Bot+客户端)· 闭源二进制 |
 
-> 定位差异:oci-panel 主打 **轻量自托管、代码全开源、单容器即起**;R探长功能更庞大但依赖其机器人服务端。适合想要"核心运维能力 + 数据完全自主"的场景。
+> 定位差异:CloudDeck 主打 **轻量自托管、代码全开源、单容器即起**;R探长功能更庞大但依赖其机器人服务端。适合想要"核心运维能力 + 数据完全自主"的场景。
 
 ## 🗺 Roadmap
 
-- [x] 救援系统(启动盘跨实例挂载修复)
-- [x] Telegram Bot 指令控制(状态/开关机/重启/配额/域名监控)
-- [x] A1 配额体检 + 一键降配(抢占式开机重试创建时已有)
-- [ ] 串行控制台连接
-- [ ] 服务限额(Limits)一键检测可开机器数
-- [ ] 多用户与操作审计日志
-- [x] ~~预留公网 IP 的创建与绑定~~ (v0.9.x 已完成)
-- [x] ~~引导卷扩容 / 更改 VPUs 性能层级~~ (v0.9.x 已完成)
-- [x] ~~多区域聚合视图、Telegram/Bark 通知~~ (v0.9.x 已完成)
+- [ ] 串行控制台连接(OCI)
+- [ ] 服务限额一键检测可开机器数(Limits API)
+- [ ] 更多云:GCP / Vultr / DigitalOcean
+- [ ] TG Bot 支持救援/创建指令
+- [x] ~~救援系统~~ (v0.20.0)
+- [x] ~~Telegram Bot 指令控制~~ (v0.12.0)
+- [x] ~~A1 配额体检 + 一键降配~~ (v0.12.0)
+- [x] ~~预留公网 IP 创建绑定 / 引导卷扩容 / VPU 调整~~ (v0.9.x)
+- [x] ~~多区域聚合视图、Telegram/Bark 通知~~ (v0.9.x)
 
 ## ⚠️ 免责声明
 
-本项目仅供学习研究与自有资源运维使用。请遵守 Oracle Cloud 服务条款(尤其是免费层资源的使用政策),因使用本工具造成的账号封禁、资源损失等后果由使用者自行承担。
-
-## License
-
-MIT
+本项目仅供学习研究与自有资源运维使用。请遵守各云服务商服务条款(尤其是 Oracle Cloud 免费层资源的使用政策),因使用本工具造成的账号封禁、资源损失等后果由使用者自行承担。

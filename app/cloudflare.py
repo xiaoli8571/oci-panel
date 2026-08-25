@@ -250,7 +250,7 @@ def deploy_from_github(acct: dict, cf_account_id: str, repo_url: str,
         raise ProviderError("无法解析仓库地址")
     owner, repo = parts[0], parts[1]
     branch = branch or "main"
-    headers = {"User-Agent": "oci-panel"}
+    headers = {"User-Agent": "clouddeck"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 

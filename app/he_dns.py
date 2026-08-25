@@ -12,7 +12,7 @@ from . import http_pool
 from .pcreds import ProviderError, extra_creds
 
 BASE = "https://dns.he.net"
-_UA = "Mozilla/5.0 (X11; Linux x86_64) oci-panel-beta"
+_UA = "Mozilla/5.0 (X11; Linux x86_64) clouddeck"
 
 
 def _session(acct: dict):

@@ -36,7 +36,7 @@ if generated_pw:
     bar = "=" * 52
     log.warning("\n%s\n  首次运行已生成随机面板密码:%s\n  (也可用环境变量 PANEL_PASSWORD 指定)\n%s", bar, generated_pw, bar)
 
-app = FastAPI(title="OCI Manage Lite", version=config.VERSION, docs_url=None, redoc_url=None)
+app = FastAPI(title=config.APP_NAME, version=config.VERSION, docs_url=None, redoc_url=None)
 
 # JSON/HTML 响应 GZip 压缩(单页 HTML ~100KB、实例列表等大 JSON 收益明显)
 app.add_middleware(GZipMiddleware, minimum_size=1024)

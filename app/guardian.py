@@ -131,7 +131,7 @@ def _notify(text: str) -> None:
         return
     try:
         final = url.replace("{msg}", urllib.parse.quote_plus(text))
-        req = urllib.request.Request(final, headers={"User-Agent": "oci-panel"})
+        req = urllib.request.Request(final, headers={"User-Agent": "clouddeck"})
         urllib.request.urlopen(req, timeout=8)
     except Exception as e:  # noqa: BLE001
         log.warning("Webhook 通知失败:%s", e)

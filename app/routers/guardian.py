@@ -74,7 +74,7 @@ def tg_test():
     if not token or not chat:
         raise HTTPException(400, "请先填写并保存 Bot Token 与 Chat ID")
     try:
-        guardian.send_tg(token, chat, "✅ OCI Manage Lite 测试消息:Telegram 通知已打通!")
+        guardian.send_tg(token, chat, "✅ CloudDeck 测试消息:Telegram 通知已打通!")
     except ProviderError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}

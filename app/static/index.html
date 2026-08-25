@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0e1319">
-<title>OCI Manage Lite · 云管理面板</title>
+<title>CloudDeck · 云驭 — 多云管理面板</title>
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7inKjvuI88L3RleHQ+PC9zdmc+Cg==">
 <link rel="stylesheet" href="/static/vendor/xterm.min.css" media="print" onload="this.media='all'">
 <script>
@@ -238,8 +238,8 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
 <div id="loginMask" class="show">
   <div class="login-card">
     <div class="logo">☁️</div>
-    <h2>OCI Manage Lite</h2>
-    <p>Oracle Cloud 轻量管理面板</p>
+    <h2>CloudDeck</h2>
+    <p>多云自托管管理面板 · OCI / AWS / IBM</p>
     <input id="loginPw" type="password" placeholder="面板密码" onkeydown="if(event.key==='Enter')doLogin()">
     <div class="err-text" id="loginErr"></div>
     <button style="width:100%" onclick="doLogin()">登 录</button>
@@ -247,7 +247,7 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
 </div>
 
 <header>
-  <div class="brand">☁️ OCI <span>Manage Lite</span></div>
+  <div class="brand">🛞 Cloud<span>Deck</span></div>
   <nav>
     <button id="nav-inst" class="active" onclick="showTab('inst')">实例管理</button>
     <button id="nav-cloud" onclick="showTab('cloud')">云与域名</button>
@@ -256,7 +256,7 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
   </nav>
   <div class="right">
     <button class="btn-ghost" id="themeBtn" onclick="toggleTheme()" title="切换 浅色/深色 主题">☀️</button>
-    <a id="updBadge" href="https://github.com/xiaoli8571/oci-panel" target="_blank" style="display:none">
+    <a id="updBadge" href="https://github.com/xiaoli8571/clouddeck" target="_blank" style="display:none">
       <button class="btn-cyan">⬆ 新版可用</button></a>
     <button class="btn-ghost" onclick="loadAll(true)">⟳ 刷新</button>
     <button class="btn-ghost" onclick="logout()">退出</button>
