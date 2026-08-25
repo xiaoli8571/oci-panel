@@ -127,7 +127,7 @@ def list_instances(acct: dict) -> list[dict]:
 
 
 def _fetch_nics(acct: dict, instance_id: str) -> list[dict]:
-    """拉取实例全部网卡详情(含 floating_ip / primary_ip)。"""
+    """拉取实例全部网卡(分页)。注:集合成员可能是摘要,floating_ip 以单卡详情为准。"""
     out, start = [], None
     while True:
         params = {"limit": 50}
@@ -143,42 +143,103 @@ def _fetch_nics(acct: dict, instance_id: str) -> list[dict]:
     return out
 
 
+def _floating_ip_map(acct: dict) -> dict[str, dict]:
+    """区域内全部浮动 IP 按 目标网卡ID 建索引:{nic_id: {id, address}}。"""
+    out: dict[str, dict] = {}
+    start = None
+    while True:
+        params = {"limit": 100}
+        if start:
+            params["start"] = start
+        d = _req(acct, "GET", "/floating_ips", params=params)
+        for f in d.get("floating_ips", []):
+            t = f.get("target") or {}
+            tid = t.get("id")
+            if tid and f.get("address"):
+                out[tid] = {"id": f.get("id") or "", "address": f["address"]}
+        start = (d.get("next") or {}).get("href", "")
+        if not start:
+            break
+        start = start.split("start=")[-1].split("&")[0]
+    return out
+
+
+def _primary_nic_id(acct: dict, instance_id: str) -> str:
+    """实例详情兜底获取主网卡 ID(列表视图可能缺 pni)。"""
+    try:
+        d = _req(acct, "GET", f"/instances/{instance_id}")
+        pni = d.get("primary_network_interface")
+        if isinstance(pni, dict) and pni.get("id"):
+            return pni["id"]
+        nis = d.get("network_interfaces") or []
+        if nis and isinstance(nis[0], dict):
+            return nis[0].get("id") or ""
+    except Exception as e:  # noqa: BLE001
+        log.debug("IBM 实例详情 %s 获取失败:%s", instance_id, e)
+    return ""
+
+
 def _enrich_network(acct: dict, rows: list[dict]) -> None:
-    """并行补全每台实例的 私网 IP / 浮动公网 IP。单台失败不影响整体列表。"""
+    """并行补全每台实例的 私网 IP / 浮动公网 IP。
+
+    三个数据源交叉(任一命中即用,互相兜底):
+      A. 区域浮动 IP 表(/floating_ips → target.id 索引),一次调用覆盖全区域;
+      B. 单网卡详情(GET /instances/{id}/network_interfaces/{nic},含权威 floating_ip);
+      C. 列表/实例详情给出的主网卡 ID(vnic_id)。
+    """
     import concurrent.futures as cf
 
     from . import config
 
+    try:
+        fip_map = _floating_ip_map(acct)
+    except Exception as e:  # noqa: BLE001
+        log.warning("IBM 浮动 IP 列表获取失败(跳过该数据源):%s", e)
+        fip_map = {}
+
     def one(row: dict) -> None:
         try:
-            nics = _fetch_nics(acct, row["id"])
-            if not nics:
-                return
-            # 主网卡优先;无法确定时取挂了浮动 IP 的那块(浮动 IP 必在主网卡上)
-            target = next((n for n in nics if n.get("id") == row.get("vnic_id")), None)
-            if target is None:
-                target = next(
-                    (n for n in nics if (n.get("floating_ip") or {}).get("address")),
-                    nics[0])
-            pri = (target.get("primary_ip") or {}).get("address") or ""
-            fip = target.get("floating_ip") or {}
+            nic_id = row.get("vnic_id") or ""
+            if not nic_id:
+                nic_id = _primary_nic_id(acct, row["id"])
+                if nic_id:
+                    row["vnic_id"] = nic_id
+            fip = fip_map.get(nic_id) if nic_id else None
+            pri = ""
+            if nic_id:
+                try:
+                    d = _req(acct, "GET",
+                             f"/instances/{row['id']}/network_interfaces/{nic_id}")
+                    pri = ((d.get("primary_ip") or {}).get("address")) or ""
+                    if not pri:
+                        ips = d.get("allowed_ips") or []
+                        if ips and isinstance(ips[0], dict):
+                            pri = ips[0].get("address") or ""
+                    f = d.get("floating_ip") or {}
+                    if f.get("address"):
+                        fip = {"id": f.get("id") or "", "address": f["address"]}
+                except Exception as e:  # noqa: BLE001
+                    log.debug("IBM 网卡详情 %s/%s 获取失败:%s",
+                              row["id"], nic_id, e)
             if pri:
                 row["private_ip"] = pri
-            if fip.get("address"):
+            if fip and fip.get("address"):
                 row["public_ip"] = fip["address"]
-                row["_fip_id"] = fip.get("id", "")
+                row["_fip_id"] = fip.get("id") or ""
                 row["public_lifetime"] = "RESERVED"
             elif not row.get("public_ip"):
-                # 兼容个别区域列表接口直接返回浮动 IP 的情况:保留已有值
                 row["public_lifetime"] = None
         except Exception as e:  # noqa: BLE001
-            log.debug("IBM 实例 %s 网卡详情获取失败:%s", row.get("name"), e)
+            log.debug("IBM 实例 %s 网络补全失败:%s", row.get("name"), e)
 
     if not rows:
         return
     workers = min(config.MAX_WORKERS, max(len(rows), 2))
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(one, rows))
+    n_fip = sum(1 for r in rows if r.get("public_ip"))
+    log.info("IBM 实例网络补全:%d 台,其中 %d 台有公网 IP(区域浮动 IP 映射 %d 条)",
+             len(rows), n_fip, len(fip_map))
 
 
 def _row(acct: dict, ins: dict) -> dict:

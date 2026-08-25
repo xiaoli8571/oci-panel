@@ -87,6 +87,8 @@ class TestLightsailAz(unittest.TestCase):
 # ---------------------------------------------------------------- IBM 浮动 IP 补全
 
 class TestIbmEnrich(unittest.TestCase):
+    """v0.20.2:三数据源交叉补全(区域浮动IP表 / 单网卡详情 / 主网卡ID兜底)。"""
+
     def setUp(self):
         self.acct = {"id": 2, "name": "ibm", "region": "jp-tok"}
         self.orig_req = ibm_cloud._req
@@ -94,73 +96,128 @@ class TestIbmEnrich(unittest.TestCase):
     def tearDown(self):
         ibm_cloud._req = self.orig_req
 
-    def _patch_req(self, list_payload, nic_payloads):
+    def _patch(self, routes):
+        """routes: {(method, path): payload_or_exc},精确匹配;按序首个命中生效。"""
+        import json as _json
+
         def fake_req(acct, method, path, *, params=None, json_body=None,
                      retry_auth=True):
-            if path == "/instances":
-                return dict(list_payload)
-            if path.startswith("/instances/") and path.endswith("/network_interfaces"):
-                iid = path.split("/")[2]
-                return dict(nic_payloads[iid])
-            raise AssertionError(f"unexpected path {path}")
+            for m, p in routes:
+                if m == method and p == path:
+                    item = routes[(m, p)]
+                    if isinstance(item, Exception):
+                        raise item
+                    return _json.loads(_json.dumps(item))   # 深拷贝
+            raise AssertionError(f"unexpected {method} {path}")
         ibm_cloud._req = fake_req
 
-    def test_list_enriches_floating_and_private_ip(self):
-        self._patch_req(
-            {"instances": [
-                {"id": "i1", "name": "vm-a", "status": "running",
-                 "primary_network_interface": {"id": "nic1"},
-                 "network_interfaces": [{"id": "nic1"}]},
-                {"id": "i2", "name": "vm-b", "status": "running"},
-            ]},
-            {"i1": {"network_interfaces": [
-                {"id": "nic1", "primary_ip": {"address": "10.240.0.5"},
-                 "floating_ip": {"id": "fip1", "address": "133.18.100.7"}}]},
-             "i2": {"network_interfaces": [
-                 {"id": "nic9", "primary_ip": {"address": "10.240.0.6"}}]}},
-        )
-        rows = ibm_cloud.list_instances(self.acct)
-        a = next(r for r in rows if r["id"] == "i1")
-        b = next(r for r in rows if r["id"] == "i2")
-        self.assertEqual(a["public_ip"], "133.18.100.7")
-        self.assertEqual(a["_fip_id"], "fip1")
-        self.assertEqual(a["public_lifetime"], "RESERVED")
-        self.assertEqual(a["private_ip"], "10.240.0.5")
-        self.assertIsNone(b["public_ip"])          # 无浮动 IP → 不显示
-        self.assertEqual(b["private_ip"], "10.240.0.6")
+    def test_full_flow_public_and_private_ip(self):
+        self._patch({
+            ("GET", "/instances/i1/network_interfaces/nic1"): {
+                "id": "nic1", "primary_ip": {"address": "10.240.0.5"},
+                "floating_ip": {"id": "fip1", "address": "133.18.100.7"}},
+            ("GET", "/instances/i1"): {
+                "primary_network_interface": {"id": "nic1"}, "status": "running"},
+            ("GET", "/floating_ips"): {"floating_ips": [
+                {"id": "fip1", "address": "133.18.100.7",
+                 "target": {"id": "nic1"}}]},
+            ("GET", "/instances"): {"instances": []},
+        })
+        rows = [{"id": "i1", "name": "vm-a", "vnic_id": "nic1",
+                 "public_ip": None, "private_ip": None, "public_lifetime": None}]
+        ibm_cloud._enrich_network(self.acct, rows)
+        r = rows[0]
+        self.assertEqual(r["public_ip"], "133.18.100.7")
+        self.assertEqual(r["_fip_id"], "fip1")
+        self.assertEqual(r["public_lifetime"], "RESERVED")
+        self.assertEqual(r["private_ip"], "10.240.0.5")
 
-    def test_enrich_failure_does_not_break_list(self):
-        def failing_req(acct, method, path, *, params=None, json_body=None,
-                        retry_auth=True):
-            if path == "/instances":
-                return {"instances": [
-                    {"id": "i9", "name": "vm-x", "status": "running",
-                     "network_interfaces": []}]}
-            raise RuntimeError("nic api down")
-        ibm_cloud._req = failing_req
-        rows = ibm_cloud.list_instances(self.acct)
-        self.assertEqual(len(rows), 1)
+    def test_no_floating_ip_attached_stays_empty(self):
+        """实例没绑浮动 IP(IBM VPC 不自动分配)→ 公网 IP 为空是正确行为。"""
+        self._patch({
+            ("GET", "/instances/i2"): {
+                "primary_network_interface": {"id": "nic9"}, "status": "running"},
+            ("GET", "/instances/i2/network_interfaces/nic9"): {
+                "id": "nic9", "primary_ip": {"address": "10.240.0.6"}},
+            ("GET", "/floating_ips"): {"floating_ips": []},
+            ("GET", "/instances"): {"instances": []},
+        })
+        rows = [{"id": "i2", "name": "vm-b", "vnic_id": "",
+                 "public_ip": None, "private_ip": None, "public_lifetime": None}]
+        ibm_cloud._enrich_network(self.acct, rows)
         self.assertIsNone(rows[0]["public_ip"])
+        self.assertEqual(rows[0]["private_ip"], "10.240.0.6")
 
-    def test_nic_pagination(self):
+    def test_region_map_used_when_detail_lacks_fip(self):
+        """单网卡详情没给 floating_ip 时,用区域浮动 IP 表兜底。"""
+        self._patch({
+            ("GET", "/instances/i3/network_interfaces/nic3"): {
+                "id": "nic3", "primary_ip": {"address": "10.240.0.7"}},
+            ("GET", "/floating_ips"): {"floating_ips": [
+                {"id": "fipZ", "address": "150.x.y.z",
+                 "target": {"id": "nic3"}}]},
+            ("GET", "/instances"): {"instances": []},
+        })
+        rows = [{"id": "i3", "name": "vm-c", "vnic_id": "nic3",
+                 "public_ip": None, "private_ip": None, "public_lifetime": None}]
+        ibm_cloud._enrich_network(self.acct, rows)
+        self.assertEqual(rows[0]["public_ip"], "150.x.y.z")
+        self.assertEqual(rows[0]["_fip_id"], "fipZ")
+        self.assertEqual(rows[0]["private_ip"], "10.240.0.7")
+
+    def test_detail_failure_still_uses_map(self):
+        """网卡详情接口挂掉,区域浮动 IP 表仍能给出公网 IP。"""
+        from app.pcreds import ProviderError as PE
+        self._patch({
+            ("GET", "/instances/i4/network_interfaces"): PE("nic detail down"),
+            ("GET", "/floating_ips"): {"floating_ips": [
+                {"id": "fipW", "address": "1.2.3.4",
+                 "target": {"id": "nic4"}}]},
+            ("GET", "/instances"): {"instances": []},
+        })
+        rows = [{"id": "i4", "name": "vm-d", "vnic_id": "nic4",
+                 "public_ip": None, "private_ip": None, "public_lifetime": None}]
+        ibm_cloud._enrich_network(self.acct, rows)
+        self.assertEqual(rows[0]["public_ip"], "1.2.3.4")
+
+    def test_list_instances_end_to_end(self):
+        """完整链路:列表 → 补全(主网卡缺失时经实例详情兜底)。"""
         calls = []
 
-        def paginated(acct, method, path, *, params=None, json_body=None,
-                      retry_auth=True):
+        def fake_req(acct, method, path, *, params=None, json_body=None,
+                     retry_auth=True):
+            calls.append((method, path))
             if path == "/instances":
                 return {"instances": [
-                    {"id": "ip", "name": "vm-p", "status": "running"}]}
-            calls.append(params.get("start"))
-            if not params.get("start"):
-                return {"network_interfaces": [{"id": "n1"}],
-                        "next": {"href": f"{path}?start=ABC"}}
-            return {"network_interfaces": [
-                {"id": "n2", "floating_ip": {"id": "f", "address": "1.2.3.4"}}]}
+                    {"id": "e1", "name": "vm-e", "status": "running"}]}
+            if path == "/floating_ips":
+                return {"floating_ips": [
+                    {"id": "f", "address": "9.9.9.9",
+                     "target": {"id": "nicE"}}]}
+            if path == "/instances/e1":
+                return {"primary_network_interface": {"id": "nicE"}}
+            if path == "/instances/e1/network_interfaces/nicE":
+                return {"id": "nicE", "primary_ip": {"address": "10.0.0.1"}}
+            raise AssertionError(path)
 
-        ibm_cloud._req = paginated
+        ibm_cloud._req = fake_req
         rows = ibm_cloud.list_instances(self.acct)
-        self.assertEqual(rows[0]["public_ip"], "1.2.3.4")
-        self.assertEqual(calls, [None, "ABC"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["public_ip"], "9.9.9.9")
+        self.assertEqual(rows[0]["private_ip"], "10.0.0.1")
+        self.assertIn(("GET", "/instances"), calls)
+
+    def test_fetch_nics_pagination(self):
+        def fake_req(acct, method, path, *, params=None, json_body=None,
+                     retry_auth=True):
+            if params.get("start"):
+                return {"network_interfaces": [{"id": "n2"}]}
+            return {"network_interfaces": [{"id": "n1"}],
+                    "next": {"href": f"{path}?start=ABC"}}
+
+        ibm_cloud._req = fake_req
+        nics = ibm_cloud._fetch_nics(self.acct, "ix")
+        self.assertEqual([n["id"] for n in nics], ["n1", "n2"])
 
 
 if __name__ == "__main__":

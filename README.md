@@ -4,6 +4,17 @@
 
 ## 🚦 更新日志
 
+### v0.20.2(IBM 公网 IP 探测强化 + 诊断接口)
+
+- 🔍 **IBM 公网 IP 三数据源交叉补全**:区域浮动 IP 表(`/floating_ips` 按 target 网卡索引)
+  → 单网卡详情(`GET /instances/{id}/network_interfaces/{nic}` 权威 floating_ip)
+  → 实例详情兜底主网卡 ID;任一命中即用,互相兜底;补全结果输出到面板日志
+- 🩺 **新增诊断接口** `GET /api/ibm/net-debug?account_id=&instance_id=`:
+  返回实例状态/主网卡/网卡详情/区域浮动 IP 原始数据,浏览器已登录直接打开即可排查
+- ℹ️ **重要说明**:IBM VPC 与 AWS 不同,**创建实例不会自动分配公网 IP**,
+  必须绑定浮动 IP。若实例本来就没绑,列表显示「-」是正常的——点该行「换IP」
+  即可自动分配并绑定一个新的浮动公网 IP
+
 ### v0.20.1(修复 IBM 公网 IP 不显示 / AWS Lightsail 创建失败)
 
 - 🐛 **IBM Cloud 实例公网 IP 不显示**:`/instances` 列表接口的网卡只有摘要(无 IP),

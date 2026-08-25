@@ -147,6 +147,38 @@ def ibm_floating_ips(account_id: int):
     return {"items": ibm_cloud.list_floating_ips(acct)}
 
 
+@router.get("/ibm/net-debug")
+def ibm_net_debug(account_id: int, instance_id: str):
+    """公网 IP 排查:返回实例详情主网卡 / 单网卡详情 / 区域浮动 IP 原始数据。"""
+    from .. import ibm_cloud
+    acct = _require(_get_account(account_id), "ibm")
+    out: dict = {"instance_id": instance_id}
+    try:
+        ins = ibm_cloud._req(acct, "GET", f"/instances/{instance_id}")
+        pni = ins.get("primary_network_interface") or {}
+        out["instance_status"] = ins.get("status")
+        out["pni"] = {k: pni.get(k) for k in ("id", "name") if isinstance(pni, dict)}
+    except Exception as e:  # noqa: BLE001
+        out["instance_error"] = str(e)
+    try:
+        out["floating_ips"] = ibm_cloud.list_floating_ips(acct)
+    except Exception as e:  # noqa: BLE001
+        out["floating_ips_error"] = str(e)
+    nic_id = (out.get("pni") or {}).get("id") or ""
+    if nic_id:
+        try:
+            d = ibm_cloud._req(
+                acct, "GET", f"/instances/{instance_id}/network_interfaces/{nic_id}")
+            out["nic_detail"] = {
+                "id": d.get("id"),
+                "primary_ip": d.get("primary_ip"),
+                "floating_ip": d.get("floating_ip"),
+            }
+        except Exception as e:  # noqa: BLE001
+            out["nic_detail_error"] = str(e)
+    return out
+
+
 # ---------------------------------------------------------------- Cloudflare DNS
 
 @router.get("/cf/zones")
