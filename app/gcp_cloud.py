@@ -143,6 +143,8 @@ def _req(acct: dict, method: str, path: str, *, params: dict | None = None,
                     "这是项目级开关,与 IAM 角色无关)")
         elif r.status_code in (401, 403):
             hint = "(服务账号权限不足?请授予 roles/compute.instanceAdmin.v1 角色)"
+        elif "<html" in low and r.status_code == 404:
+            hint = "(操作查询路径不匹配,已自动降级重试;若反复出现请更新面板)"
         elif "not found" in low or "was not found" in low:
             hint = "(检查项目 ID / 资源是否存在)"
         elif "quota" in low:
@@ -355,10 +357,32 @@ def create_instance(progress, acct: dict, d: dict) -> dict:
     progress(f"提交创建请求:{name} @ {zone}({mt})…")
     op = _req(acct, "POST", f"/projects/{proj}/zones/{zone}/instances", json_body=body)
     op_name = op.get("name", "")
+    op_url = op.get("selfLink") or ""
+    zone_ops_base = f"/projects/{proj}/zones/{zone}/operations"
+    region_ops_base = "/projects/{}/regions/{}/operations".format(
+        proj, zone.rsplit("-", 1)[0])
+    global_ops_base = f"/projects/{proj}/global/operations"
+    tried = set()
     deadline = time.time() + _T_WAIT_RUN
     while time.time() < deadline:
-        st = _req(acct, "GET",
-                  f"/projects/{proj}/zones/{zone}/operations/{op_name}")
+        st = None
+        # 优先用 selfLink;否则按 区域级→全球级 顺序探测(避免 404 HTML)
+        for base in ([op_url] if op_url else []) + \
+                [zone_ops_base + "/" + op_name,
+                 region_ops_base + "/" + op_name,
+                 global_ops_base + "/" + op_name]:
+            if not base or base in tried:
+                continue
+            try:
+                st = _req(acct, "GET",
+                          base if base.startswith("http") else _COMPUTE + base)
+                break
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+        tried.add(op_url)
+        if st is None:
+            time.sleep(_POLL)
+            continue
         s = st.get("status")
         if s == "DONE":
             if st.get("error"):
