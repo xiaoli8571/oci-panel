@@ -224,7 +224,7 @@ def gcp_create(body: dict):
     from .. import gcp_cloud, jobs
     acct = _require(_get_account(int(body["account_id"])), "gcp")
     d = {k: body.get(k) for k in ("name", "zone", "machine_type", "image",
-                                  "subnet", "ssh_key", "boot_gbs")}
+                                  "subnet", "ssh_key", "boot_gbs", "disk_type")}
     d["external_ip"] = bool(body.get("external_ip", True))
     if not str(d.get("ssh_key") or "").strip():
         raise HTTPException(400, "请填写 SSH 公钥(否则无法登录实例)")

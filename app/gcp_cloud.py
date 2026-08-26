@@ -128,14 +128,27 @@ def _req(acct: dict, method: str, path: str, *, params: dict | None = None,
         err = d.get("error") or {}
         msg = err.get("message") or r.text[:180]
         code = err.get("code") or r.status_code
+        low = str(msg).lower()
+        errs0 = (err.get("errors") or [{}])[0]
+        reason = (errs0.get("reason") or "").lower()
         hint = ""
-        s = str(msg).lower()
-        if r.status_code in (401, 403):
-            hint = "(服务账号权限不足?需要 compute 实例查看/操作权限)"
-        elif "not found" in s or "was not found" in s:
+        if "servicedisabled" in reason or "has not been used in project" in low \
+                or ("it is disabled" in low):
+            # API 未启用:给出可点的启用链接(Google 的报错里通常自带)
+            import re as _re
+            m = _re.search(r'https://console\.developers\.google\.com/[^\s"\']+', str(msg))
+            url = m.group(0) if m else \
+                "https://console.cloud.google.com/apis/library/compute.googleapis.com"
+            hint = (f"(Compute Engine API 未启用:打开 {url} 点「启用」,等待 1~2 分钟后重试;"
+                    "这是项目级开关,与 IAM 角色无关)")
+        elif r.status_code in (401, 403):
+            hint = "(服务账号权限不足?请授予 roles/compute.instanceAdmin.v1 角色)"
+        elif "not found" in low or "was not found" in low:
             hint = "(检查项目 ID / 资源是否存在)"
-        elif "quota" in s:
+        elif "quota" in low:
             hint = "(配额不足:检查该区域的 CPU 配额或机型可用性)"
+        elif "billing" in low:
+            hint = "(项目未关联结算账号:console.cloud.google.com/billing 绑定后再创建实例)"
         raise ProviderError(f"Google Cloud 错误 [{code}] {msg} {hint}".strip())
     return d
 
@@ -327,6 +340,10 @@ def create_instance(progress, acct: dict, d: dict) -> dict:
     boot = d.get("boot_gbs")
     if boot and int(boot) >= 10:
         init_params["diskSizeGb"] = str(int(boot))
+    # 磁盘类型:免费层必须用标准盘 pd-standard(平衡盘/SSD 计费)
+    disk_type = str(d.get("disk_type") or "").strip()
+    if disk_type:
+        init_params["diskType"] = f"zones/{zone}/diskTypes/{disk_type}"
 
     body = {
         "name": name,
