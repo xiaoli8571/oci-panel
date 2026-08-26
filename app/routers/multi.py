@@ -179,6 +179,66 @@ def ibm_net_debug(account_id: int, instance_id: str):
     return out
 
 
+# ---------------------------------------------------------------- Google Cloud
+
+@router.get("/gcp/meta")
+def gcp_meta(account_id: int):
+    from .. import gcp_cloud
+    acct = _require(_get_account(account_id), "gcp")
+    return gcp_cloud.gcp_meta(acct)
+
+
+@router.get("/gcp/mach-types")
+def gcp_mach_types(account_id: int, zone: str):
+    from .. import gcp_cloud
+    acct = _require(_get_account(account_id), "gcp")
+    return {"items": gcp_cloud.mach_types(acct, zone)}
+
+
+@router.get("/gcp/subnets")
+def gcp_subnets(account_id: int, region: str):
+    from .. import gcp_cloud
+    acct = _require(_get_account(account_id), "gcp")
+    return {"items": gcp_cloud.subnets(acct, region)}
+
+
+@router.post("/gcp/op")
+def gcp_op(body: dict):
+    from .. import gcp_cloud
+    acct = _require(_get_account(int(body["account_id"])), "gcp")
+    return gcp_cloud.instance_op(acct, body["name"], body["zone"], body["op"].lower())
+
+
+@router.post("/gcp/change-ip")
+def gcp_change_ip(body: dict):
+    from .. import gcp_cloud, jobs
+    acct = _require(_get_account(int(body["account_id"])), "gcp")
+    name, zone = body["name"], body["zone"]
+    job = jobs.start_job("gcp_change_ip", gcp_cloud.change_public_ip,
+                         acct, "", f"{name}@{zone}")
+    return {"job_id": job["id"]}
+
+
+@router.post("/gcp/create")
+def gcp_create(body: dict):
+    from .. import gcp_cloud, jobs
+    acct = _require(_get_account(int(body["account_id"])), "gcp")
+    d = {k: body.get(k) for k in ("name", "zone", "machine_type", "image",
+                                  "subnet", "ssh_key", "boot_gbs")}
+    d["external_ip"] = bool(body.get("external_ip", True))
+    if not str(d.get("ssh_key") or "").strip():
+        raise HTTPException(400, "请填写 SSH 公钥(否则无法登录实例)")
+    job = jobs.start_job("gcp_create", gcp_cloud.create_instance, acct, d)
+    return {"job_id": job["id"]}
+
+
+@router.post("/gcp/terminate")
+def gcp_terminate(body: dict):
+    from .. import gcp_cloud
+    acct = _require(_get_account(int(body["account_id"])), "gcp")
+    return gcp_cloud.terminate_instance(acct, body["name"], body["zone"])
+
+
 # ---------------------------------------------------------------- Cloudflare DNS
 
 @router.get("/cf/zones")

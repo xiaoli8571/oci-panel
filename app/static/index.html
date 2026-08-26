@@ -559,6 +559,7 @@ pre.log{background:var(--log-bg);border:1px solid var(--line);border-radius:8px;
       <span class="chip" id="pc-cloudflare" onclick="setProvider('cloudflare')">Cloudflare</span>
       <span class="chip" id="pc-dnshe" onclick="setProvider('dnshe')">DNSHE</span>
       <span class="chip" id="pc-ibm" onclick="setProvider('ibm')">IBM Cloud</span>
+      <span class="chip" id="pc-gcp" onclick="setProvider('gcp')">Google Cloud</span>
     </div>
     <div style="margin:6px 0 2px"><label style="margin-top:0">备注名称 *(自定义,方便区分)</label>
       <input id="f-name" placeholder="如 myserver1 / 我的CF主号"></div>
@@ -648,6 +649,21 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
         <div style="grid-column:1/-1"><p class="hint">IBM Cloud 控制台 → Manage → Access(IAM) → API keys → 创建 API Key。支持 <b>VPC 实例列表/电源/换IP</b>,需给 API Key 所在账户授权 VPC 实例查看与操作权限。</p></div>
       </div>
     </div>
+    <div id="pv-gcp" hidden>
+      <div class="grid2">
+        <div style="grid-column:1/-1"><label>服务账号 JSON 密钥 *<span style="color:var(--muted)">(IAM与管理 → 服务账号 → 密钥 → 添加密钥 → JSON;编辑时留空表示不修改)</span></label>
+          <textarea id="f-gcpsa" style="min-height:110px;font-family:monospace;font-size:11px" placeholder='{
+  "type": "service_account",
+  "project_id": "my-project",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...",
+  "client_email": "xxx@my-project.iam.gserviceaccount.com",
+  ...
+}'></textarea></div>
+        <div><label>项目 ID(留空自动取 JSON 内 project_id)</label><input id="f-gcpproj" placeholder="如 my-project"></div>
+        <div><label>备注区域(可空)</label><input id="f-gcpregion" placeholder="如 us-west1"></div>
+        <div style="grid-column:1/-1"><p class="hint">建议授予服务账号 <b>Compute Instance Admin (v1)</b> 角色;最小权限需包含 compute.instances.list/get/setTags/start/stop/delete、machineTypes.list、zones.list、subnetworks.list。支持 <b>实例列表/电源/换IP/创建/终止</b>。SSH 登录用户名固定为 <b>clouddeck</b>(公钥写入实例元数据)。</p></div>
+      </div>
+    </div>
     <div class="foot">
       <button class="btn-ghost" onclick="hide('acctModal')">取消</button>
       <button onclick="saveAcct()">保存</button>
@@ -664,6 +680,7 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
       <span class="chip on" id="cp-oci" onclick="setCreatePlatform('oci')">Oracle Cloud</span>
       <span class="chip" id="cp-aws" onclick="setCreatePlatform('aws')">AWS</span>
       <span class="chip" id="cp-ibm" onclick="setCreatePlatform('ibm')">IBM Cloud</span>
+      <span class="chip" id="cp-gcp" onclick="setCreatePlatform('gcp')">Google Cloud</span>
       <span class="chip on" id="chip-amd" style="margin-left:6px" onclick="setPreset('amd')">AMD 微型 1C/1G(永远免费)</span>
       <span class="chip" id="chip-arm" onclick="setPreset('arm')">ARM A1.Flex 2C/12G(可强开)</span>
       <span class="chip" id="chip-bootvol" style="margin-left:6px" onclick="setPreset('bootvol')">💾 从启动盘开机</span>
@@ -719,6 +736,20 @@ key_file=&lt;path to your private keyfile&gt;"></textarea>
         <div><label>可用区 *</label><select id="ibm-zone"></select></div>
       </div>
       <p class="hint" id="ibmCreateHint">加载中…</p>
+    </div>
+    <div id="gcpCreateFields" hidden style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">
+      <div class="grid2">
+        <div><label>可用区 Zone *</label><select id="gcp-zone" onchange="onGcpZone()"></select></div>
+        <div><label>机型 Machine Type *</label><select id="gcp-mt"><option value="">请先选择可用区</option></select></div>
+        <div style="grid-column:1/-1"><label>系统镜像 *(也可选「自定义」手填镜像路径)</label>
+          <select id="gcp-image" onchange="onGcpImage()"></select>
+          <input id="gcp-image-custom" placeholder="projects/<项目>/global/images/family/<家族名>" style="display:none;margin-top:6px"></div>
+        <div><label>子网(留空用 default 网络)</label><select id="gcp-subnet"></select></div>
+        <div><label>启动盘(GB,可空=镜像默认)</label><input id="gcp-boot" type="number" min="10" max="2000" placeholder="默认 10GB"></div>
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;color:var(--text);font-size:13px">
+          <input type="checkbox" id="gcp-extip" checked style="width:auto"> 分配临时外网 IP(勾选才能直接访问;换IP功能依赖它)</div>
+        <p class="hint" id="gcpCreateHint" style="grid-column:1/-1">加载中…</p>
+      </div>
     </div>
       <p class="hint" id="awsCreateHint">加载中…</p>
     </div>
@@ -1116,17 +1147,20 @@ function renderInstances() {
         <td class="wrap" data-l="配置">${spec}<br><span style="color:var(--muted);font-size:11px">${esc(i.shape || "")}</span></td>
         <td data-l="启动盘">${i.boot_gbs ? i.boot_gbs + " GB" : "-"}</td>
         <td data-l="区域/AD">${esc(i.region)}<br><span style="color:var(--muted);font-size:12px">${esc(i.ad)}</span></td>
-        <td data-l="账户">${esc(i.account_name)}${i.provider === "aws" ? ' <span class="badge b-busy">AWS</span>' : ""}${i.provider === "ibm" ? ' <span class="badge b-purple">IBM</span>' : ""}</td>
+        <td data-l="账户">${esc(i.account_name)}${i.provider === "aws" ? ' <span class="badge b-busy">AWS</span>' : ""}${i.provider === "ibm" ? ' <span class="badge b-purple">IBM</span>' : ""}${i.provider === "gcp" ? ' <span class="badge b-info">GCP</span>' : ""}</td>
         <td class="cell-ops"><div class="ops">
           <button ${running ? "" : "disabled"} class="btn-green" onclick="openSshModal(${idx})">SSH</button>
           <button ${running ? "" : "disabled"} class="btn-cyan" onclick="openSftpModal(${idx})">SFTP</button>
           <button ${running ? "disabled" : ""} onclick="doOp(${idx},'START')">启动</button>
-          <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'${i.provider === "aws" || i.provider === "ibm" ? "STOP" : "SOFTSTOP"}')">关机</button>
+          <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'${i.provider !== "oci" ? "STOP" : "SOFTSTOP"}')">关机</button>
           <button ${running ? "" : "disabled"} class="btn-warn" onclick="doOp(${idx},'RESET')">重启</button>
           ${i.provider === "aws"
             ? `<button class="btn-cyan" onclick="awsChangeIp(${idx})">换IP</button>`
             : i.provider === "ibm"
             ? `<button class="btn-cyan" onclick="ibmChangeIp(${idx})">换IP</button>`
+            : i.provider === "gcp"
+            ? `<button class="btn-cyan" onclick="gcpChangeIp(${idx})">换IP</button>
+               <button class="btn-warn" onclick="gcpReboot(${idx})">硬重启</button>`
             : `<button class="btn-cyan" onclick="openNet(${idx})">网络</button>
                <button class="btn-ghost" onclick="openVol(${idx})">磁盘</button>
                <button class="btn-ghost" onclick="openRescue(${idx})">🛟 救援</button>
@@ -1154,6 +1188,10 @@ async function doOp(idx, op) {
     } else if (i.provider === "ibm") {
       await api("/api/ibm/op", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, instance_id: i.id, op }) });
+    } else if (i.provider === "gcp") {
+      await api("/api/gcp/op", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, name: i.name, zone: i._zone,
+        op: op === "RESET" ? "reset" : op.toLowerCase() }) });
     } else {
       await api("/api/instances/op", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, compartment_id: i.compartment_id, instance_id: i.id, op }) });
@@ -1200,24 +1238,83 @@ function setCreatePlatform(p) {
   $("#cp-oci").classList.toggle("on", p === "oci");
   $("#cp-aws").classList.toggle("on", p === "aws");
   $("#cp-ibm").classList.toggle("on", p === "ibm");
+  $("#cp-gcp").classList.toggle("on", p === "gcp");
   const aws = p === "aws";
   const ibm = p === "ibm";
-  $("#createSub").textContent = ibm ? "IBM Cloud VPC 创建:选择 VPC/子网/镜像/Profile" : (aws ? "AWS EC2 / Lightsail 创建" : "预设一键预填规格;ARM A1 支持容量不足自动重试(强开模式)");
-  // 切换字段可见性:OCI / AWS / IBM
+  const gcp = p === "gcp";
+  $("#createSub").textContent = ibm ? "IBM Cloud VPC 创建:选择 VPC/子网/镜像/Profile"
+    : (gcp ? "Google Cloud GCE 创建:选择 可用区/机型/镜像/子网,SSH 用户名为 clouddeck"
+    : (aws ? "AWS EC2 / Lightsail 创建" : "预设一键预填规格;ARM A1 支持容量不足自动重试(强开模式)"));
+  // 切换字段可见性:OCI / AWS / IBM / GCP
   const ociFields = ["c-comp", "c-ad", "c-subnet", "c-boot", "c-os", "c-image", "c-ocpus-box", "c-mem-box", "c-retry-box", "c-delay-box", "c-bv-box"];
-  ociFields.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (aws || ibm) ? "none" : ""; });
+  ociFields.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = (aws || ibm || gcp) ? "none" : ""; });
   document.getElementById("awsCreateFields").hidden = !aws;
   document.getElementById("ibmCreateFields").hidden = !ibm;
+  document.getElementById("gcpCreateFields").hidden = !gcp;
   // 隐藏/显示 OCI 预设 chips
-  document.getElementById("chip-amd").style.display = (aws || ibm) ? "none" : "";
-  document.getElementById("chip-arm").style.display = (aws || ibm) ? "none" : "";
+  document.getElementById("chip-amd").style.display = (aws || ibm || gcp) ? "none" : "";
+  document.getElementById("chip-arm").style.display = (aws || ibm || gcp) ? "none" : "";
+  document.getElementById("chip-bootvol").style.display = (aws || ibm || gcp) ? "none" : "";
   if (aws) {
     onAwsServiceChange();
   } else if (ibm) {
     loadIbmMeta();
+  } else if (gcp) {
+    loadGcpMeta();
   } else {
     setPreset(presetKind || "arm");
   }
+}
+
+/* ================= GCP 创建辅助 ================= */
+let gcpZonesCache = [];
+
+async function loadGcpMeta() {
+  const v = $("#c-acct").value || "";
+  if (v.split(":")[0] !== "gcp") return;
+  const aid = +v.split(":")[1];
+  $("#gcpCreateHint").textContent = "加载 Google Cloud 元数据…";
+  try {
+    const d = await api(`/api/gcp/meta?account_id=${aid}`);
+    gcpZonesCache = d.zones || [];
+    $("#gcp-zone").innerHTML = `<option value="">请选择可用区</option>` + gcpZonesCache.map(z =>
+      `<option value="${esc(z)}">${esc(z)}</option>`).join("");
+    $("#gcp-image").innerHTML = `<option value="">请选择</option>`
+      + (d.images || []).map(x => `<option value="${esc(x.id)}">${esc(x.label)}</option>`).join("")
+      + `<option value="__custom__">自定义镜像路径…</option>`;
+    onGcpImage();
+    $("#gcpCreateHint").textContent = `项目 ${d.project}:${gcpZonesCache.length} 个可用区可选`;
+  } catch (e) { $("#gcpCreateHint").textContent = "加载失败:" + e.message; }
+}
+
+async function onGcpZone() {
+  const v = $("#c-acct").value || "";
+  if (v.split(":")[0] !== "gcp") return;
+  const aid = +v.split(":")[1];
+  const zone = $("#gcp-zone").value;
+  if (!zone) { $("#gcp-mt").innerHTML = `<option value="">请先选择可用区</option>`; return; }
+  $("#gcpCreateHint").textContent = "加载机型与子网…";
+  try {
+    const [mt, sn] = await Promise.all([
+      api(`/api/gcp/mach-types?account_id=${aid}&zone=${encodeURIComponent(zone)}`),
+      api(`/api/gcp/subnets?account_id=${aid}&region=${encodeURIComponent(zone.rsplit("-",1)[0])}`)
+    ]);
+    $("#gcp-mt").innerHTML = mt.items.length
+      ? mt.items.map(m => `<option value="${esc(m.name)}">${esc(m.name)} · ${m.cpu}核/${m.mem_gb}G</option>`).join("")
+      : `<option value="">该可用区无可用机型</option>`;
+    const preferred = ["e2-small", "e2-medium", "e2-standard-2", "t2-small", "n2-standard-2"];
+    for (const p of preferred) {
+      if (mt.items.some(m => m.name === p)) { $("#gcp-mt").value = p; break; }
+    }
+    $("#gcp-subnet").innerHTML = `<option value="">默认网络(default)</option>`
+      + sn.items.map(n => `<option value="${esc(n.name)}">${esc(n.name)} · ${esc(n.cidr)} · ${esc(n.network)}</option>`).join("");
+    $("#gcpCreateHint").textContent = `${zone}:${mt.items.length} 个机型,${sn.items.length} 个子网`;
+  } catch (e) { $("#gcpCreateHint").textContent = "加载失败:" + e.message; }
+}
+
+function onGcpImage() {
+  const v = $("#gcp-image").value;
+  document.getElementById("gcp-image-custom").style.display = v === "__custom__" ? "" : "none";
 }
 
 function onAwsServiceChange() {
@@ -1329,11 +1426,13 @@ async function openCreate() {
   const ocis = acctItems.filter(a => (a.provider || "oci") === "oci");
   const awss = acctItems.filter(a => a.provider === "aws");
   const ibms = acctItems.filter(a => a.provider === "ibm");
-  if (!ocis.length && !awss.length && !ibms.length) return toast("请先添加 Oracle Cloud / AWS / IBM 账户", "err");
+  const gcps = acctItems.filter(a => a.provider === "gcp");
+  if (!ocis.length && !awss.length && !ibms.length && !gcps.length) return toast("请先添加 Oracle Cloud / AWS / IBM / Google Cloud 账户", "err");
   $("#c-acct").innerHTML = "";
   if (ocis.length) $("#c-acct").innerHTML += `<optgroup label="Oracle Cloud">${ocis.map(a => `<option value="oci:${a.id}">${esc(a.name)}(${esc(a.region)})</option>`).join("")}</optgroup>`;
   if (awss.length) $("#c-acct").innerHTML += `<optgroup label="AWS">${awss.map(a => `<option value="aws:${a.id}">${esc(a.name)}(${esc(a.region || "自动")})</option>`).join("")}</optgroup>`;
   if (ibms.length) $("#c-acct").innerHTML += `<optgroup label="IBM Cloud">${ibms.map(a => `<option value="ibm:${a.id}">${esc(a.name)}(${esc(a.region)})</option>`).join("")}</optgroup>`;
+  if (gcps.length) $("#c-acct").innerHTML += `<optgroup label="Google Cloud">${gcps.map(a => `<option value="gcp:${a.id}">${esc(a.name)}(${esc(a.region || "GCE")})</option>`).join("")}</optgroup>`;
   setCreatePlatform("oci");
   show("createModal");
   await onCreateAcct();
@@ -1351,6 +1450,10 @@ async function onCreateAcct() {
   }
   if (parts[0] === "ibm") {
     setCreatePlatform("ibm");
+    return;
+  }
+  if (parts[0] === "gcp") {
+    setCreatePlatform("gcp");
     return;
   }
   setCreatePlatform("oci");
@@ -1433,6 +1536,31 @@ function onIbmVpc() {
 }
 async function submitCreate() {
   const v = $("#c-acct").value || "";
+  if (v.split(":")[0] === "gcp") {
+    const aid = +v.split(":")[1];
+    const imageSel = $("#gcp-image").value;
+    const image = imageSel === "__custom__" ? $("#gcp-image-custom").value.trim() : imageSel;
+    const body = {
+      account_id: aid,
+      name: $("#c-name").value.trim(),
+      zone: $("#gcp-zone").value,
+      machine_type: $("#gcp-mt").value,
+      image,
+      subnet: $("#gcp-subnet").value,
+      boot_gbs: $("#gcp-boot").value ? +$("#gcp-boot").value : null,
+      ssh_key: $("#c-ssh").value.trim(),
+      external_ip: $("#gcp-extip").checked,
+    };
+    if (!body.name) return toast("请填写实例名称", "err");
+    if (!body.zone || !body.machine_type || !body.image) return toast("请选择 可用区/机型/镜像", "err");
+    if (!body.ssh_key || !body.ssh_key.includes("ssh-")) return toast("请填写 SSH 公钥(ssh-ed25519/ssh-rsa 开头)", "err");
+    hide("createModal");
+    try {
+      const d = await api("/api/gcp/create", { method: "POST", body: JSON.stringify(body) });
+      openJob("🚀 创建实例 · GCE " + body.name, d.job_id, () => loadInstances());
+    } catch (e) { toast(e.message, "err"); }
+    return;
+  }
   if (v.split(":")[0] === "ibm") {
     const aid = +v.split(":")[1];
     const body = {
@@ -1856,6 +1984,9 @@ async function submitTerminate() {
     } else if (i.provider === "ibm") {
       await api("/api/ibm/terminate", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, instance_id: i.id }) });
+    } else if (i.provider === "gcp") {
+      await api("/api/gcp/terminate", { method: "POST", body: JSON.stringify({
+        account_id: i.account_id, name: i.name, zone: i._zone }) });
     } else {
       await api("/api/instances/terminate", { method: "POST", body: JSON.stringify({
         account_id: i.account_id, instance_id: i.id,
@@ -1863,6 +1994,23 @@ async function submitTerminate() {
     }
     toast("终止指令已下发", "ok"); hide("termModal"); setTimeout(loadInstances, 5000);
   } catch (e) { toast(e.message, "err"); }
+}
+async function gcpChangeIp(idx) {
+  const i = instItems[idx];
+  if (!confirm(`更换「${i.name}」的外网 IP?\n将删除现有访问配置并申请新的临时 IP(约 30~60 秒)。`)) return;
+  try {
+    const d = await api("/api/gcp/change-ip", { method: "POST", body: JSON.stringify({
+      account_id: i.account_id, name: i.name, zone: i._zone }) });
+    openJob("🔄 更换公网 IP · " + i.name + " (GCP)", d.job_id, () => loadInstances());
+  } catch (e) { toast(e.message, "err"); }
+}
+function gcpReboot(idx) {
+  const i = instItems[idx];
+  if (!confirm(`对 GCE 实例「${i.name}」执行硬重启(RESET)?`)) return;
+  api("/api/gcp/op", { method: "POST", body: JSON.stringify({
+    account_id: i.account_id, name: i.name, zone: i._zone, op: "reset" }) })
+    .then(() => { toast("已下发 RESET 指令", "ok"); setTimeout(loadInstances, 5000); })
+    .catch(e => toast(e.message, "err"));
 }
 async function awsChangeIp(idx) {
   const i = instItems[idx];
@@ -2034,6 +2182,7 @@ function openAcctModal(a) {
   $("#f-cftoken").value = "";
   $("#f-dnshekey").value = ""; $("#f-dnshesecret").value = "";
   $("#f-ibmkey").value = ""; $("#f-ibmregion").value = "";
+  $("#f-gcpsa").value = ""; $("#f-gcpproj").value = ""; $("#f-gcpregion").value = "";
   $("#am-pemname").textContent = "";
   setProvider(a?.provider || "oci", true);
   show("acctModal");
@@ -2048,6 +2197,8 @@ async function saveAcct() {
     cf_token: $("#f-cftoken").value.trim(),
     dnshe_api_key: $("#f-dnshekey").value.trim(), dnshe_api_secret: $("#f-dnshesecret").value,
     ibm_api_key: $("#f-ibmkey").value.trim(),
+    gcp_sa_json: $("#f-gcpsa").value.trim(),
+    gcp_project: $("#f-gcpproj").value.trim(),
   };
   if (!body.name) return toast("请填写备注名称", "err");
   if (curProvider === "oci") {
@@ -2064,6 +2215,20 @@ async function saveAcct() {
   } else if (curProvider === "ibm") {
     if (!body.ibm_api_key || !$("#f-ibmregion").value.trim()) return toast("请填写 IBM IAM API Key 与区域", "err");
     body.region = $("#f-ibmregion").value.trim();
+  } else if (curProvider === "gcp") {
+    const saText = body.gcp_sa_json;
+    if (!saText && !editAcctId && !body.gcp_project) {
+      // 编辑留空=沿用旧密钥;新建必须提供 JSON 或至少项目 ID 由后端拒绝
+      return toast("请粘贴服务账号 JSON 密钥", "err");
+    }
+    if (saText && !saText.includes("private_key")) return toast("JSON 不完整:缺少 private_key,请粘贴完整服务账号密钥文件", "err");
+    if (saText) {
+      try {
+        const info = JSON.parse(saText);
+        if (!body.gcp_project && info.project_id) { body.gcp_project = info.project_id; $("#f-gcpproj").value = info.project_id; }
+      } catch (e) { return toast("服务账号 JSON 解析失败:" + e.message, "err"); }
+    }
+    body.region = $("#f-gcpregion").value.trim();   // 纯备注,不影响鉴权
   }
   try {
     if (editAcctId) await api("/api/accounts/" + editAcctId, { method: "PUT", body: JSON.stringify(body) });
@@ -2228,7 +2393,7 @@ async function schedDel(id, name) {
 }
 function openSchedModal() {
   if (!instItems.length) return toast("请先到实例管理页加载实例列表", "err");
-  const cands = instItems.filter(i => i.provider === "oci" || i.provider === "aws" || i.provider === "ibm");
+  const cands = instItems.filter(i => ["oci", "aws", "ibm", "gcp"].includes(i.provider));
   if (!cands.length) return toast("没有可调度的云实例", "err");
   $("#sched-inst").innerHTML = cands.map((i, k) =>
     `<option value="${instItems.indexOf(i)}">${esc(i.name)}(${i.account_name}·${esc(i.region)}·${i.state})</option>`).join("");
@@ -3161,7 +3326,7 @@ async function runDdns() {
 
 /* ================= 账户弹窗辅助 ================= */
 let curProvider = "oci";
-const PROV_LABELS = { oci: "Oracle Cloud", aws: "AWS", cloudflare: "Cloudflare", dnshe: "DNSHE", ibm: "IBM Cloud" };
+const PROV_LABELS = { oci: "Oracle Cloud", aws: "AWS", cloudflare: "Cloudflare", dnshe: "DNSHE", ibm: "IBM Cloud", gcp: "Google Cloud" };
 function setProvider(p, silent) {
   curProvider = p;
   Object.keys(PROV_LABELS).forEach(k => {

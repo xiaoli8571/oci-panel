@@ -1,9 +1,9 @@
 # 🛞 CloudDeck · 云驭 — 轻量自托管多云管理面板
 
-> **原 OCI Manage Lite**,现已成长为覆盖 **Oracle Cloud / AWS / IBM Cloud** 的轻量自托管多云面板。
+> **原 OCI Manage Lite**,现已成长为覆盖 **Oracle Cloud / AWS / IBM Cloud / Google Cloud** 的轻量自托管多云面板。
 > Python (FastAPI) + 原生前端,单容器部署、无外部数据库依赖、代码全开源可审计。
 
-`self-hosted` `oracle-cloud` `aws` `ibm-cloud` `cloudflare` `vps` `web-ssh` `sftp` `telegram-bot` `fastapi`
+`self-hosted` `oracle-cloud` `aws` `ibm-cloud` `google-cloud` `gcp` `cloudflare` `vps` `web-ssh` `sftp` `telegram-bot` `fastapi`
 
 ---
 
@@ -14,7 +14,7 @@
 | 能力 | 说明 |
 |---|---|
 | 🖥 实例总览 | 多账户/多区域并行扫描,stale-while-revalidate 缓存;状态、公网 IP(临时/保留)、私网 IP、规格、启动盘一览 |
-| ⏻ 电源操作 | 启动 / 软关机 / 强制关机 / 重启(OCI · AWS EC2/Lightsail · IBM VPC) |
+| ⏻ 电源操作 | 启动 / 软关机 / 强制关机 / 重启(OCI · AWS EC2/Lightsail · IBM VPC · GCP GCE,含硬重启 RESET) |
 | 🔄 换公网 IP | 一键换临时 IP(OCI 自动关开机;AWS/IBM 释放重申);可选联动 Cloudflare A 记录自动更新 |
 | 🌐 IPv6 / 保留 IP | OCI IPv6 一键附加;保留公网 IP 新建/删除/绑定/解绑 |
 | 🔓 端口开放 | 一键向安全列表追加 TCP 入站规则(22/80/443/自定义,IPv4+IPv6) |
@@ -27,6 +27,7 @@
 - **Oracle Cloud**:AMD 微型 / ARM A1 一键预设,**强开 ARM**(容量不足自动重试,次数间隔可调);镜像/子网/AD 可选;**从现有启动盘开机**
 - **AWS**:EC2(区域→AMI→实例类型→子网→安全组→密钥对)与 Lightsail(区域→可用区→Blueprint→Bundle)全生命周期
 - **IBM Cloud**:VPC → 子网 → 镜像(公开+私有)→ Profile → SSH Key → 可用区
+- **Google Cloud**:可用区 → 机型(e2/n2/n1 全列表)→ 公共镜像家族(Ubuntu/Debian/Rocky/Alma/CentOS/Windows,支持自定义镜像路径)→ 子网 → 外网 IP 开关;SSH 公钥写入元数据,登录用户名 `clouddeck`
 
 ### 🛟 救援系统(特色)
 
@@ -70,6 +71,16 @@
 - **⬆ 版本检查** / **☀️ 浅深主题**(跟随系统) / **healthz 健康检查**
 
 ## 🆕 更新日志
+
+### v0.22.0(接入 Google Cloud)
+
+- ☁️ **Google Cloud Compute Engine 管理**:账户类型新增 GCP,粘贴服务账号 JSON 密钥即可
+  - 实例列表:`aggregatedList` 单接口聚合全部区域,状态/外网IP/内网IP/机型/启动盘
+  - 电源操作:启动/停止/重启(RESET),实例行新增「硬重启」按钮
+  - 换公网 IP:删除并重建访问配置获取新的临时外网 IP(任务窗口实时进度)
+  - 创建实例:可用区→机型(含 vCPU/内存标注)→公共镜像家族或自定义路径→子网(default 或指定)→外网 IP 开关→启动盘大小;创建过程等待至 RUNNING 并回报 IP
+  - 终止实例、守护中心保活/流量守护兼容、测活诊断、SSH/SFTP 免密导入
+  - 实现:纯 REST(compute/v1)+ google-auth 服务账号签名,Token 缓存自动续期
 
 ### v0.21.0(品牌升级:CloudDeck)
 
@@ -185,7 +196,8 @@ PANEL_PASSWORD=yourpassword python -m uvicorn app.main:app --host 0.0.0.0 --port
 | 救援模式(启动盘跨实例挂载) | ✅ | ❌ |
 | Cloudflare DNS/Workers/Pages | ✅ | ✅ 仅DNS |
 | Telegram Bot 指令控制 | ✅ | ✅ 更全 |
-| GCP/Azure/DO/SolusVM/VirtFusion | ❌ 暂不支持 | ✅ |
+| GCP Compute Engine | ✅ v0.22 | ❌ |
+| Azure/DO/SolusVM/VirtFusion | ❌ 暂不支持 | ✅ |
 | 部署形态 | 单容器 · 无外部依赖 · 开源可审计 | 双端架构(TG Bot+客户端)· 闭源二进制 |
 
 > 定位差异:CloudDeck 主打 **轻量自托管、代码全开源、单容器即起**;R探长功能更庞大但依赖其机器人服务端。适合想要"核心运维能力 + 数据完全自主"的场景。
@@ -194,7 +206,7 @@ PANEL_PASSWORD=yourpassword python -m uvicorn app.main:app --host 0.0.0.0 --port
 
 - [ ] 串行控制台连接(OCI)
 - [ ] 服务限额一键检测可开机器数(Limits API)
-- [ ] 更多云:GCP / Vultr / DigitalOcean
+- [ ] 更多云:Azure / Vultr / DigitalOcean(GCP 已于 v0.22 支持)
 - [ ] TG Bot 支持救援/创建指令
 - [x] ~~救援系统~~ (v0.20.0)
 - [x] ~~Telegram Bot 指令控制~~ (v0.12.0)

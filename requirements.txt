@@ -6,3 +6,4 @@ asyncssh>=2.14
 websockets>=12
 boto3>=1.28
 requests>=2.31
+google-auth>=2.23

@@ -51,6 +51,18 @@ def _validate(a: AccountIn):
             raise HTTPException(400, "请填写 IBM Cloud IAM API Key(Manage→Access(IAM)→API keys 创建)")
         if not a.region.strip():
             raise HTTPException(400, "请填写区域,如 us-south / eu-de / jp-tok / au-syd")
+    elif p == "gcp":
+        raw = a.gcp_sa_json.strip()
+        if not raw and not a.gcp_project.strip():
+            raise HTTPException(400, "请粘贴服务账号 JSON 密钥(IAM与管理→服务账号→密钥)")
+        if raw:
+            import json as _json
+            try:
+                info = _json.loads(raw)
+            except ValueError as e:
+                raise HTTPException(400, f"服务账号 JSON 解析失败:{e}")
+            if not isinstance(info, dict) or "private_key" not in info                     or "client_email" not in info:
+                raise HTTPException(400, "JSON 不完整:需要包含 private_key 与 client_email")
     elif p == "cloudflare":
         if len(a.cf_token.strip()) < 30:
             raise HTTPException(400, "请填写 Cloudflare API Token(至少 30 字符)")
@@ -63,7 +75,7 @@ def _validate(a: AccountIn):
         raise HTTPException(400, f"不支持的提供商:{p}")
 
 
-PROVIDERS = ("oci", "aws", "ibm", "cloudflare", "dnshe")
+PROVIDERS = ("oci", "aws", "ibm", "gcp", "cloudflare", "dnshe")
 
 
 def _extra_json(a: AccountIn, keep_old: str = "") -> str:
@@ -78,6 +90,8 @@ def _extra_json(a: AccountIn, keep_old: str = "") -> str:
         "aws_access_key_id": a.aws_access_key_id.strip() or old.get("aws_access_key_id", ""),
         "aws_secret_key": a.aws_secret_key.strip() or old.get("aws_secret_key", ""),
         "ibm_api_key": a.ibm_api_key.strip() or old.get("ibm_api_key", ""),
+        "gcp_sa_json": a.gcp_sa_json.strip() or old.get("gcp_sa_json", ""),
+        "gcp_project": a.gcp_project.strip() or old.get("gcp_project", ""),
         "cf_token": a.cf_token.strip() or old.get("cf_token", ""),
         "he_email": a.he_email.strip() or old.get("he_email", ""),
         "he_pass": a.he_pass or old.get("he_pass", ""),
@@ -230,6 +244,8 @@ def check_account(account_id: int):
         return _check_aws(acct)
     if p == "ibm":
         return _check_ibm(acct)
+    if p == "gcp":
+        return _check_gcp(acct)
     if p == "cloudflare":
         return _check_cf(acct)
     if p == "dnshe":
@@ -287,6 +303,18 @@ def _check_ibm(acct: dict) -> dict:
     hint = info.get("hint") or ""
     if info.get("remote_ok"):
         hint = f"IAM 认证成功,{info.get('instance_count', 0)} 台实例({info.get('region')})"
+    return {**info, "hint": hint}
+
+
+def _check_gcp(acct: dict) -> dict:
+    from .. import gcp_cloud
+    try:
+        info = gcp_cloud.check_account(acct)
+    except Exception as e:  # noqa: BLE001
+        info = {"provider": "gcp", "remote_ok": False, "error": str(e)}
+    hint = info.get("hint") or ""
+    if info.get("remote_ok"):
+        hint = f"服务账号认证成功,{info.get('instance_count', 0)} 台实例"
     return {**info, "hint": hint}
 
 

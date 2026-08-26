@@ -18,6 +18,8 @@ class AccountIn(BaseModel):
     aws_access_key_id: str = ""
     aws_secret_key: str = ""
     ibm_api_key: str = ""            # IBM Cloud IAM API Key
+    gcp_sa_json: str = ""            # Google Cloud 服务账号 JSON 全文(编辑时留空不修改)
+    gcp_project: str = ""            # GCP 项目 ID(可留空自动取 JSON 内 project_id)
     cf_token: str = ""
     he_email: str = ""
     he_pass: str = ""

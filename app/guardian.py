@@ -160,7 +160,7 @@ def run_once() -> dict:
             continue
         acct = dict(row)
         p = (acct.get("provider") or "oci").lower()
-        if p not in ("oci", "aws", "ibm"):
+        if p not in ("oci", "aws", "ibm", "gcp"):
             continue   # DNS 类账户不参与守护
         stats["checked"] += 1
         try:
@@ -168,6 +168,9 @@ def run_once() -> dict:
                 rows = aws_cloud.list_instances(acct)
                 ls_rows, ls_errs = aws_cloud.list_lightsail(acct)
                 rows += ls_rows
+            elif p == "gcp":
+                from . import gcp_cloud
+                rows = gcp_cloud.list_instances(acct)
             else:
                 rows = oci_client.list_instances(acct)
         except Exception as e:  # noqa: BLE001

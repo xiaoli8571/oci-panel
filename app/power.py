@@ -6,9 +6,9 @@ from .database import db
 from .pcreds import ProviderError
 
 MAPS = {
-    "start":  {"oci": "START",    "aws": "START", "aws_ls": "START",  "ibm": "start",       "label": "开机"},
-    "stop":   {"oci": "SOFTSTOP", "aws": "STOP",  "aws_ls": "STOP",   "ibm": "stop",        "label": "关机"},
-    "reboot": {"oci": "RESET",    "aws": "RESET", "aws_ls": "REBOOT", "ibm": "reboot",      "label": "重启"},
+    "start":  {"oci": "START",    "aws": "START", "aws_ls": "START",  "ibm": "start",  "gcp": "start",  "label": "开机"},
+    "stop":   {"oci": "SOFTSTOP", "aws": "STOP",  "aws_ls": "STOP",   "ibm": "stop",   "gcp": "stop",   "label": "关机"},
+    "reboot": {"oci": "RESET",    "aws": "RESET", "aws_ls": "REBOOT", "ibm": "reboot", "gcp": "reset",  "label": "重启"},
 }
 
 
@@ -40,6 +40,9 @@ def power_op(row: dict, action: str) -> str:
     elif p == "ibm":
         from . import ibm_cloud
         ibm_cloud.instance_op(acct, row["id"], m["ibm"])
+    elif p == "gcp":
+        from . import gcp_cloud
+        gcp_cloud.instance_op(acct, row.get("name") or "", row.get("_zone") or "", m["gcp"])
     else:
         raise ProviderError(f"该类型({p})不支持远程电源操作")
     try:

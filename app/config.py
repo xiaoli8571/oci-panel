@@ -12,7 +12,7 @@ CONFIG_PATH = DATA_DIR / "config.json"        # 存放面板密码哈希等
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
-VERSION = "0.21.0"
+VERSION = "0.22.0"
 
 APP_NAME = "CloudDeck"          # 面板名称(原 OCI Manage Lite)
 REPO_SLUG = "xiaoli8571/clouddeck"   # GitHub 仓库(用于版本检查)
